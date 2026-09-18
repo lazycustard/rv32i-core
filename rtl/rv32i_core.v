@@ -38,6 +38,17 @@ module rv32i_core #(
     output wire        uart_valid_o,
     output wire [7:0]  uart_data_o,
 
+    // Performance counters. cycles and instret are 64 bits because that is
+    // what mcycle and minstret are in the specification -- they become those
+    // CSRs when Zicsr lands. The other two are not architectural; they exist
+    // to show where the cycles went.
+    output wire [63:0] perf_cycles_o,
+    output wire [63:0] perf_instret_o,
+    output wire [31:0] perf_stalls_o,      // cycles lost to load-use stalls
+    output wire [31:0] perf_redirects_o,   // taken branches and jumps
+    output wire [31:0] perf_branches_o,    // conditional branches executed
+    output wire [31:0] perf_br_taken_o,    // of those, how many were taken
+
     // Trace outputs. Not part of the architecture; testbenches use these to
     // know when a program has finished and whether it executed cleanly.
     output wire [31:0] dbg_pc_o,
@@ -87,15 +98,25 @@ module rv32i_core #(
     //======================================================================
     reg [31:0] id_pc, id_pc_plus4, id_instr;
 
+    // Does this slot hold a real instruction? A flushed slot carries a NOP,
+    // which is a perfectly valid instruction to execute but must not be
+    // counted as one that retired -- the program never issued it. Without
+    // this bit, instructions-retired would count the pipeline's own
+    // bookkeeping and the CPI figure would be wrong in the flattering
+    // direction.
+    reg id_valid;
+
     always @(posedge clk_i) begin
         if (rst_i || flush_id) begin
             id_pc       <= 32'b0;
             id_pc_plus4 <= 32'b0;
             id_instr    <= `NOP;
+            id_valid    <= 1'b0;
         end else if (!stall_id) begin
             id_pc       <= if_pc;
             id_pc_plus4 <= if_pc_plus4;
             id_instr    <= if_instr;
+            id_valid    <= 1'b1;
         end
     end
 
@@ -178,6 +199,7 @@ module rv32i_core #(
     reg                   ex_mem_read, ex_mem_write;
     reg                   ex_is_branch, ex_is_jump, ex_target_src;
     reg                   ex_is_ecall, ex_illegal;
+    reg                   ex_valid;
 
     always @(posedge clk_i) begin
         if (rst_i || flush_ex) begin
@@ -202,6 +224,7 @@ module rv32i_core #(
             ex_target_src <= `TGT_PC;
             ex_is_ecall   <= 1'b0;
             ex_illegal    <= 1'b0;
+            ex_valid      <= 1'b0;
         end else begin
             ex_pc         <= id_pc;
             ex_pc_plus4   <= id_pc_plus4;
@@ -224,6 +247,7 @@ module rv32i_core #(
             ex_target_src <= id_target_src;
             ex_is_ecall   <= id_is_ecall;
             ex_illegal    <= id_illegal;
+            ex_valid      <= id_valid;
         end
     end
 
@@ -294,6 +318,7 @@ module rv32i_core #(
     reg [`WB_SEL_W-1:0] mem_wb_sel;
     reg                 mem_mem_read, mem_mem_write;
     reg                 mem_is_ecall, mem_illegal;
+    reg                 mem_valid;
 
     always @(posedge clk_i) begin
         if (rst_i) begin
@@ -308,6 +333,7 @@ module rv32i_core #(
             mem_mem_write  <= 1'b0;
             mem_is_ecall   <= 1'b0;
             mem_illegal    <= 1'b0;
+            mem_valid      <= 1'b0;
         end else begin
             mem_alu_result <= ex_alu_result;
             mem_store_data <= ex_fwd_b;       // forwarded, not the stale read
@@ -320,6 +346,7 @@ module rv32i_core #(
             mem_mem_write  <= ex_mem_write;
             mem_is_ecall   <= ex_is_ecall;
             mem_illegal    <= ex_illegal;
+            mem_valid      <= ex_valid;
         end
     end
 
@@ -408,6 +435,7 @@ module rv32i_core #(
     reg [4:0]  wb_rd_addr_r;
     reg        wb_reg_write_r;
     reg        wb_is_ecall_r, wb_illegal_r;
+    reg        wb_valid_r;
 
     always @(posedge clk_i) begin
         if (rst_i) begin
@@ -416,12 +444,14 @@ module rv32i_core #(
             wb_reg_write_r <= 1'b0;
             wb_is_ecall_r  <= 1'b0;
             wb_illegal_r   <= 1'b0;
+            wb_valid_r     <= 1'b0;
         end else begin
             wb_data_r      <= mem_result;
             wb_rd_addr_r   <= mem_rd_addr;
             wb_reg_write_r <= mem_reg_write;
             wb_is_ecall_r  <= mem_is_ecall;
             wb_illegal_r   <= mem_illegal;
+            wb_valid_r     <= mem_valid;
         end
     end
 
@@ -456,6 +486,76 @@ module rv32i_core #(
         .fwd_a_o         (fwd_a),
         .fwd_b_o         (fwd_b)
     );
+
+    //======================================================================
+    // Performance counters
+    //
+    // Cycles and retired instructions are the two numbers CPI is computed
+    // from. The other three say where the difference went: a cycle that
+    // retires nothing was either a stall or part of a branch's shadow.
+    //
+    // Counting retirement in WB rather than issue in IF matters. An
+    // instruction that is fetched and then flushed never retires, so it
+    // must not be counted -- otherwise the wasted work disappears from the
+    // measurement and CPI comes out looking better than the core is.
+    //======================================================================
+    reg [63:0] perf_cycles;
+    reg [63:0] perf_instret;
+    reg [31:0] perf_stalls;
+    reg [31:0] perf_redirects;
+    reg [31:0] perf_branches;
+    reg [31:0] perf_br_taken;
+
+    always @(posedge clk_i) begin
+        if (rst_i) begin
+            perf_cycles    <= 64'b0;
+            perf_instret   <= 64'b0;
+            perf_stalls    <= 32'b0;
+            perf_redirects <= 32'b0;
+            perf_branches  <= 32'b0;
+            perf_br_taken  <= 32'b0;
+        end else begin
+            perf_cycles <= perf_cycles + 64'd1;
+
+            if (wb_valid_r) begin
+                perf_instret <= perf_instret + 64'd1;
+            end
+
+            // One cycle of the pipeline held still.
+            if (stall_if) begin
+                perf_stalls <= perf_stalls + 32'd1;
+            end
+
+            // A taken branch or a jump. Each one costs two flushed
+            // instructions, so this number times two is the control-flow
+            // penalty in cycles.
+            if (ex_redirect) begin
+                perf_redirects <= perf_redirects + 32'd1;
+            end
+
+            // Every conditional branch reaching EX, taken or not, and how
+            // many of those were taken. The taken rate is the baseline a
+            // branch predictor has to beat -- always-not-taken is what this
+            // core effectively does today.
+            //
+            // Counted separately from perf_redirects because that one also
+            // includes jumps, which are unconditional and have nothing to
+            // predict.
+            if (ex_valid && ex_is_branch) begin
+                perf_branches <= perf_branches + 32'd1;
+                if (ex_branch_taken) begin
+                    perf_br_taken <= perf_br_taken + 32'd1;
+                end
+            end
+        end
+    end
+
+    assign perf_cycles_o    = perf_cycles;
+    assign perf_instret_o   = perf_instret;
+    assign perf_stalls_o    = perf_stalls;
+    assign perf_redirects_o = perf_redirects;
+    assign perf_branches_o  = perf_branches;
+    assign perf_br_taken_o  = perf_br_taken;
 
     //======================================================================
     // Trace

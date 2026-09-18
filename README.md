@@ -205,6 +205,57 @@ what a driver for real hardware has to do, and the register has to exist for
 that code to be written against it. This is the core's first peripheral and
 the beginning of a bus.
 
+## Performance
+
+The core counts cycles, retired instructions, stalls, branches and taken
+branches in hardware. `mcycle` and `minstret` are 64 bits because that is
+what the specification says they are; they become those CSRs when Zicsr
+lands.
+
+| Program | Cycles | Instructions | CPI | Stalls | Branches | Taken | Jumps |
+|---|---|---|---|---|---|---|---|
+| `hello` | 169 | 119 | **1.42** | 14 | 29 | 14 | 3 |
+| `fib` | 5,386 | 4,385 | **1.22** | 31 | 639 | 284 | 200 |
+| `sort` | 2,656 | 1,854 | **1.43** | 92 | 470 | 227 | 127 |
+| `primes` | 13,531 | 9,331 | **1.45** | 76 | 2,892 | 1,354 | 707 |
+
+### Where the cycles go
+
+Every cycle is accounted for by one identity:
+
+```
+cycles = instructions + stalls + 2 x (taken branches + jumps) + pipeline fill
+```
+
+| Program | Predicted | Actual |
+|---|---|---|
+| `hello` | 119 + 14 + 2x17 + 2 = 169 | 169 |
+| `fib` | 4385 + 31 + 2x484 + 2 = 5386 | 5386 |
+| `sort` | 1854 + 92 + 2x354 + 2 = 2656 | 2656 |
+| `primes` | 9331 + 76 + 2x2061 + 2 = 13531 | 13531 |
+
+Exact on all four. `program_tb.v` asserts this rather than leaving it as an
+observation: if the pipeline's valid bit were wrong and flushed instructions
+counted as retired, the residual would go negative and CPI would quietly
+look better than the core is. Forcing the valid bit high fails all four
+programs with `counter accounting is impossible`.
+
+### What the numbers say
+
+Branches are the whole story. About **47% of branches are taken**, and each
+one costs two flushed instructions because branches resolve in EX. That is
+roughly 0.2 to 0.25 of the CPI above 1.0 — far more than stalls, which are
+almost free at well under 1% of cycles.
+
+Two things follow, and they are the next two pieces of work:
+
+- **Forwarding is doing its job.** Load-use stalls are rare, so there is
+  nothing to win there.
+- **A branch predictor is worth building.** Today the core effectively
+  predicts not-taken and is wrong 47% of the time. Even a simple 2-bit
+  predictor should take a visible bite out of CPI — and the numbers above
+  are the baseline it has to beat.
+
 ## Design notes
 
 **The ALU control field is 4 bits, not 3.** RV32I has ten distinct ALU
@@ -250,7 +301,7 @@ sim/                 simulation output (git-ignored)
 - [x] **Phase 1** — complete and correct RV32I instruction set
 - [x] **Phase 2** — official [riscv-tests](https://github.com/riscv-software-src/riscv-tests) conformance suite
 - [x] **Phase 3** — run compiled C programs, UART output
-- [ ] **Phase 4** — performance counters, CPI, synthesis + timing numbers
+- [~] **Phase 4** — performance counters and CPI done; synthesis numbers need Vivado
 - [ ] **Phase 5** — block RAM inference, timing closure on Artix-7
 - [ ] **Phase 6** — M / C / Zicsr extensions
 

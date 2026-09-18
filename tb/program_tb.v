@@ -29,9 +29,14 @@ module program_tb;
     reg         rst;
     wire        uart_valid;
     wire [7:0]  uart_data;
+    wire [63:0] perf_cycles, perf_instret;
+    wire [31:0] perf_stalls, perf_redirects, perf_branches, perf_br_taken;
     wire [31:0] dbg_pc;
     wire        dbg_ecall;
     wire        dbg_illegal;
+
+    reg [63:0] cpi_x100;
+    reg [63:0] accounted;
 
     integer cycles;
     integer chars;
@@ -52,6 +57,12 @@ module program_tb;
         .rst_i         (rst),
         .uart_valid_o  (uart_valid),
         .uart_data_o   (uart_data),
+        .perf_cycles_o    (perf_cycles),
+        .perf_instret_o   (perf_instret),
+        .perf_stalls_o    (perf_stalls),
+        .perf_redirects_o (perf_redirects),
+        .perf_branches_o  (perf_branches),
+        .perf_br_taken_o  (perf_br_taken),
         .dbg_pc_o      (dbg_pc),
         .dbg_ecall_o   (dbg_ecall),
         .dbg_illegal_o (dbg_illegal)
@@ -139,10 +150,46 @@ module program_tb;
             $display("  %0s: executed an illegal instruction", test_name);
             $display("RESULT: FAIL");
         end else begin
+            // Every cycle should be accounted for: one per retired
+            // instruction, one per stall, two per redirect, plus a small
+            // fixed cost to fill and drain the pipeline.
+            //
+            // This is a real check on the counters, not decoration. If the
+            // valid bit were wrong and flushed instructions were counted as
+            // retired, instret would rise, the residual would go negative,
+            // and CPI would quietly look better than the core is.
+            accounted = perf_instret + perf_stalls + (2 * perf_redirects);
+
+            if (perf_cycles < accounted) begin
+                $display("  %0s: counter accounting is impossible -- %0d cycles but %0d accounted",
+                         test_name, perf_cycles, accounted);
+                $display("RESULT: FAIL");
+                $finish;
+            end
+            if ((perf_cycles - accounted) > 64'd8) begin
+                $display("  %0s: %0d cycles unaccounted for, expected pipeline fill only",
+                         test_name, perf_cycles - accounted);
+                $display("RESULT: FAIL");
+                $finish;
+            end
+
+            // Two decimal places without floating point: scale by 100,
+            // then split. CPI is a ratio of two integers the hardware
+            // counted, so it should not need a real number to report.
+            if (perf_instret != 64'd0) begin
+                cpi_x100 = (perf_cycles * 64'd100) / perf_instret;
+            end else begin
+                cpi_x100 = 64'd0;
+            end
+
             // Distinct prefix: the program's own output is echoed to stdout
             // too, and a program that prints "fib:" would otherwise be
             // mistaken for this line by anything grepping for the name.
-            $display("STATS: %0d cycles, %0d characters", cycles, chars);
+            $display("STATS: %0d cyc, %0d instr, CPI %0d.%02d, %0d stall, %0d br (%0d taken), %0d jmp",
+                     perf_cycles, perf_instret,
+                     cpi_x100 / 64'd100, cpi_x100 % 64'd100,
+                     perf_stalls, perf_branches, perf_br_taken,
+                     perf_redirects - perf_br_taken);
             $display("RESULT: PASS");
         end
 
