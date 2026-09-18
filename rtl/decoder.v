@@ -31,6 +31,15 @@ module decoder (
     output wire [4:0]               rd_addr_o,
     output wire [2:0]               funct3_o,
 
+    // Does this instruction actually read rs1 / rs2? The hazard unit needs
+    // this to avoid stalling on a register number that is present in the
+    // instruction word but never used. Every instruction has bits sitting in
+    // the rs1 and rs2 positions; LUI, AUIPC and JAL simply do not read them.
+    // Treating those bits as real dependencies costs stall cycles for
+    // hazards that do not exist.
+    output reg                      uses_rs1_o,
+    output reg                      uses_rs2_o,
+
     // Datapath control
     output reg                      reg_write_o,
     output reg  [`ALU_OP_W-1:0]     alu_op_o,
@@ -87,6 +96,8 @@ module decoder (
         is_ecall_o   = 1'b0;
         is_ebreak_o  = 1'b0;
         illegal_o    = 1'b0;
+        uses_rs1_o   = 1'b0;
+        uses_rs2_o   = 1'b0;
 
         case (opcode)
 
@@ -95,6 +106,8 @@ module decoder (
             //   add sub sll slt sltu xor srl sra or and
             //--------------------------------------------------------------
             `OP_REG: begin
+                uses_rs1_o  = 1'b1;
+                uses_rs2_o  = 1'b1;
                 reg_write_o = 1'b1;
                 alu_src_a_o = `SRC_A_RS1;
                 alu_src_b_o = `SRC_B_RS2;
@@ -113,6 +126,7 @@ module decoder (
             //   addi slti sltiu xori ori andi slli srli srai
             //--------------------------------------------------------------
             `OP_IMM: begin
+                uses_rs1_o  = 1'b1;
                 reg_write_o = 1'b1;
                 alu_src_a_o = `SRC_A_RS1;
                 alu_src_b_o = `SRC_B_IMM;
@@ -132,6 +146,7 @@ module decoder (
             // Loads: lb lh lw lbu lhu   (address = rs1 + imm)
             //--------------------------------------------------------------
             `OP_LOAD: begin
+                uses_rs1_o  = 1'b1;
                 reg_write_o = 1'b1;
                 alu_op_o    = `ALU_ADD;
                 alu_src_a_o = `SRC_A_RS1;
@@ -149,6 +164,8 @@ module decoder (
             // Stores: sb sh sw   (address = rs1 + imm, data = rs2)
             //--------------------------------------------------------------
             `OP_STORE: begin
+                uses_rs1_o  = 1'b1;
+                uses_rs2_o  = 1'b1;
                 alu_op_o    = `ALU_ADD;
                 alu_src_a_o = `SRC_A_RS1;
                 alu_src_b_o = `SRC_B_IMM;
@@ -164,6 +181,8 @@ module decoder (
             // two register values directly.
             //--------------------------------------------------------------
             `OP_BRANCH: begin
+                uses_rs1_o   = 1'b1;
+                uses_rs2_o   = 1'b1;
                 imm_sel_o    = `IMM_B;
                 is_branch_o  = 1'b1;
                 target_src_o = `TGT_PC;
@@ -187,6 +206,7 @@ module decoder (
             // This is what makes a function return possible.
             //--------------------------------------------------------------
             `OP_JALR: begin
+                uses_rs1_o   = 1'b1;
                 reg_write_o  = 1'b1;
                 imm_sel_o    = `IMM_I;
                 wb_sel_o     = `WB_PC4;
@@ -258,6 +278,8 @@ module decoder (
             mem_write_o = 1'b0;
             is_branch_o = 1'b0;
             is_jump_o   = 1'b0;
+            uses_rs1_o  = 1'b0;
+            uses_rs2_o  = 1'b0;
         end
     end
 

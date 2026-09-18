@@ -17,6 +17,7 @@ module tb_decoder;
 
     wire [4:0]              rs1_addr, rs2_addr, rd_addr;
     wire [2:0]              funct3;
+    wire                    uses_rs1, uses_rs2;
     wire                    reg_write;
     wire [`ALU_OP_W-1:0]    alu_op;
     wire                    alu_src_a, alu_src_b;
@@ -35,6 +36,8 @@ module tb_decoder;
         .rs2_addr_o   (rs2_addr),
         .rd_addr_o    (rd_addr),
         .funct3_o     (funct3),
+        .uses_rs1_o   (uses_rs1),
+        .uses_rs2_o   (uses_rs2),
         .reg_write_o  (reg_write),
         .alu_op_o     (alu_op),
         .alu_src_a_o  (alu_src_a),
@@ -264,6 +267,48 @@ module tb_decoder;
         //------------------------------------------------------------------
         // Illegal encodings. Each must raise illegal_o and, just as
         // importantly, must not write a register or touch memory.
+        //------------------------------------------------------------------
+        //------------------------------------------------------------------
+        // Source register usage. Every instruction word has bits in the rs1
+        // and rs2 positions, but LUI, AUIPC and JAL do not read them. The
+        // hazard unit stalls on these flags, so a false positive here costs
+        // real cycles for a dependency that does not exist.
+        //------------------------------------------------------------------
+        feed(32'h0031_00B3);                        // add
+        chk("add uses rs1",     uses_rs1, 32'd1);
+        chk("add uses rs2",     uses_rs2, 32'd1);
+
+        feed(32'hFFF1_0093);                        // addi
+        chk("addi uses rs1",    uses_rs1, 32'd1);
+        chk("addi no rs2",      uses_rs2, 32'd0);
+
+        feed(32'h0081_2083);                        // lw
+        chk("lw uses rs1",      uses_rs1, 32'd1);
+        chk("lw no rs2",        uses_rs2, 32'd0);
+
+        feed(32'h0055_2423);                        // sw
+        chk("sw uses rs1",      uses_rs1, 32'd1);
+        chk("sw uses rs2",      uses_rs2, 32'd1);
+
+        feed(32'h0020_8863);                        // beq
+        chk("beq uses rs1",     uses_rs1, 32'd1);
+        chk("beq uses rs2",     uses_rs2, 32'd1);
+
+        feed(32'h0001_00E7);                        // jalr
+        chk("jalr uses rs1",    uses_rs1, 32'd1);
+        chk("jalr no rs2",      uses_rs2, 32'd0);
+
+        feed(32'h0010_00EF);                        // jal
+        chk("jal reads nothing",{uses_rs1, uses_rs2}, 32'd0);
+
+        feed(32'h1234_50B7);                        // lui
+        chk("lui reads nothing",{uses_rs1, uses_rs2}, 32'd0);
+
+        feed(32'h0000_1097);                        // auipc
+        chk("auipc reads none", {uses_rs1, uses_rs2}, 32'd0);
+
+        //------------------------------------------------------------------
+        // Illegal encodings
         //------------------------------------------------------------------
         chk_illegal("bad opcode",    32'hFFFF_FFFF);  // opcode 1111111
         chk_illegal("mul (M ext)",   32'h0231_00B3);  // funct7 = 0000001

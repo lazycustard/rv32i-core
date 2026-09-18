@@ -111,4 +111,12 @@
 `define TGT_PC  1'b0   // branches and JAL: PC + imm
 `define TGT_RS1 1'b1   // JALR: rs1 + imm, with bit 0 cleared
 
+//--------------------------------------------------------------------------
+// Forwarding source select
+//--------------------------------------------------------------------------
+`define FWD_W 2
+`define FWD_NONE 2'b00   // use the value read from the register file
+`define FWD_MEM  2'b01   // forward from the MEM stage (most recent)
+`define FWD_WB   2'b10   // forward from the WB stage
+
 `endif
