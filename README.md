@@ -151,10 +151,10 @@ The core runs C compiled by GCC and prints through a memory-mapped UART:
 ```
 $ make programs
 
-[ PASS ] fib             5386 cycles, 31 characters
-[ PASS ] hello            169 cycles, 14 characters
-[ PASS ] primes         13531 cycles, 59 characters
-[ PASS ] sort            2656 cycles, 37 characters
+[ PASS ] fib           5386 cyc, 4385 instr, CPI 1.22, 31 stall, 639 br (284 taken), 200 jmp
+[ PASS ] hello         169 cyc, 119 instr, CPI 1.42, 14 stall, 29 br (14 taken), 3 jmp
+[ PASS ] primes        13531 cyc, 9331 instr, CPI 1.45, 76 stall, 2892 br (1354 taken), 707 jmp
+[ PASS ] sort          2656 cyc, 1854 instr, CPI 1.43, 92 stall, 470 br (227 taken), 127 jmp
 
  programs: 4/4 PASSED
 ```
@@ -162,7 +162,7 @@ $ make programs
 ```
 $ make programs TB=primes
 
-[ PASS ] primes         13531 cycles, 59 characters
+[ PASS ] primes        13531 cyc, 9331 instr, CPI 1.45, 76 stall, 2892 br (1354 taken), 707 jmp
            | primes: 2 3 5 7 11 13 17 19 23 29 31 37 41 43 47
            | count: 15
 ```
