@@ -32,6 +32,12 @@ module rv32i_core #(
     input  wire        clk_i,
     input  wire        rst_i,          // synchronous, active high
 
+    // UART transmit. One character per cycle that uart_valid_o is high.
+    // On an FPGA this drives a real serial transmitter; in simulation the
+    // testbench collects the bytes.
+    output wire        uart_valid_o,
+    output wire [7:0]  uart_data_o,
+
     // Trace outputs. Not part of the architecture; testbenches use these to
     // know when a program has finished and whether it executed cleanly.
     output wire [31:0] dbg_pc_o,
@@ -318,11 +324,18 @@ module rv32i_core #(
     end
 
     //======================================================================
-    // MEM - data memory
+    // MEM - data memory and peripherals
+    //
+    // Address decode, such as it is: anything in 0x1xxx_xxxx is peripheral
+    // space, everything else is data memory. One comparator on four bits is
+    // enough while there is exactly one peripheral; a real bus arrives when
+    // there is a second one.
     //======================================================================
     wire [3:0]  mem_byte_en;
-    wire [31:0] mem_store_word, mem_raw_rdata, mem_load_data;
+    wire [31:0] mem_store_word, mem_load_data;
     wire        mem_misaligned;
+
+    wire mem_is_periph = (mem_alu_result[31:28] == 4'h1);
 
     lsu u_lsu (
         .funct3_i     (mem_funct3),
@@ -337,6 +350,10 @@ module rv32i_core #(
         .misaligned_o (mem_misaligned)
     );
 
+    // A store to peripheral space must not also land in memory.
+    wire [3:0]  dmem_byte_en = mem_is_periph ? 4'b0000 : mem_byte_en;
+    wire [31:0] dmem_rdata;
+
     dmem #(
         .WORDS     (DMEM_WORDS),
         .INIT_FILE (DMEM_INIT)
@@ -344,9 +361,30 @@ module rv32i_core #(
         .clk_i     (clk_i),
         .addr_i    (mem_alu_result),
         .wdata_i   (mem_store_word),
-        .byte_en_i (mem_byte_en),
-        .rdata_o   (mem_raw_rdata)
+        .byte_en_i (dmem_byte_en),
+        .rdata_o   (dmem_rdata)
     );
+
+    //----------------------------------------------------------------------
+    // UART, memory mapped at 0x1000_0000:
+    //
+    //   +0  transmit, write only  -- the low byte is sent
+    //   +4  status,   read only   -- bit 0 set means ready to transmit
+    //
+    // The status register is always ready. Software still polls it, because
+    // that is what a driver for real hardware has to do, and the register
+    // has to exist for that code to be written against.
+    //----------------------------------------------------------------------
+    wire uart_tx_sel     = mem_is_periph && (mem_alu_result[7:0] == 8'h00);
+    wire uart_status_sel = mem_is_periph && (mem_alu_result[7:0] == 8'h04);
+
+    // byte_en is already zero for a misaligned store, so a bad address
+    // cannot transmit a character either.
+    assign uart_valid_o = mem_mem_write && uart_tx_sel && (mem_byte_en != 4'b0);
+    assign uart_data_o  = mem_store_data[7:0];
+
+    wire [31:0] periph_rdata = uart_status_sel ? 32'h0000_0001 : 32'h0000_0000;
+    wire [31:0] mem_raw_rdata = mem_is_periph ? periph_rdata : dmem_rdata;
 
     // The value this instruction will write back.
     wire [31:0] mem_result = (mem_wb_sel == `WB_MEM) ? mem_load_data  :
