@@ -66,7 +66,11 @@ mkdir -p "$BUILD_DIR" sim
 # One simulation binary, reused by every program.
 #---------------------------------------------------------------------------
 SIM="sim/program.vvp"
-if ! "$IVERILOG" -g2012 -Wall -I rtl -I tb -o "$SIM" \
+# BP=0 rebuilds with the branch predictor disabled, reproducing the
+# baseline the speedup is measured against.
+BP_ARG=""
+if [ "${BP:-1}" = "0" ]; then BP_ARG="-Pprogram_tb.BP_ENABLE=0"; echo "branch predictor: DISABLED (baseline)"; fi
+if ! "$IVERILOG" -g2012 -Wall -I rtl -I tb $BP_ARG -o "$SIM" \
         rtl/*.v tb/program_tb.v > sim/program_build.log 2>&1; then
     echo "simulation build failed:"
     sed 's/^/    /' sim/program_build.log

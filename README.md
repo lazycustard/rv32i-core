@@ -38,6 +38,7 @@ make lint               # syntax and width checks, no simulation
 make wave TB=alu        # open the waveform in GTKWave
 make riscv-tests        # official conformance suite (needs RISC-V GCC)
 make programs           # compile and run the C programs in tests/programs/
+BP=0 make programs      # same, with the branch predictor disabled
 ```
 
 No GNU Make? The runner is a plain shell script:
@@ -178,6 +179,8 @@ not just a demo.
 | `sort.c` | Arrays, signed comparison (negative values sort correctly) |
 | `primes.c` | Software division: RV32I has no divide, so `%` becomes a call to `__umodsi3` in libgcc |
 
+The cycle counts in this section are with branch prediction enabled.
+
 ### What it takes to run C
 
 Three pieces, none of which the compiled C provides for itself:
@@ -212,49 +215,68 @@ branches in hardware. `mcycle` and `minstret` are 64 bits because that is
 what the specification says they are; they become those CSRs when Zicsr
 lands.
 
-| Program | Cycles | Instructions | CPI | Stalls | Branches | Taken | Jumps |
-|---|---|---|---|---|---|---|---|
-| `hello` | 169 | 119 | **1.42** | 14 | 29 | 14 | 3 |
-| `fib` | 5,386 | 4,385 | **1.22** | 31 | 639 | 284 | 200 |
-| `sort` | 2,656 | 1,854 | **1.43** | 92 | 470 | 227 | 127 |
-| `primes` | 13,531 | 9,331 | **1.45** | 76 | 2,892 | 1,354 | 707 |
+### Branch prediction: before and after
+
+Branches dominated the cost. Every taken branch flushed two instructions,
+because the core only learned where a branch went once it reached EX. A
+64-entry branch target buffer with 2-bit direction counters now guesses in
+the fetch stage, and EX checks the guess.
+
+| Program | Cycles before | Cycles after | CPI before | CPI after | Saved |
+|---|---|---|---|---|---|
+| `hello` | 169 | 147 | 1.42 | **1.23** | 13.0% |
+| `fib` | 5,386 | 4,994 | 1.22 | **1.13** | 7.3% |
+| `sort` | 2,656 | 2,368 | 1.43 | **1.27** | 10.8% |
+| `primes` | 13,531 | 11,531 | 1.45 | **1.23** | 14.8% |
+
+| Program | Mispredicts before | After | Control transfers | Accuracy |
+|---|---|---|---|---|
+| `hello` | 17 | 6 | 32 | 81% |
+| `fib` | 484 | 288 | 839 | 66% |
+| `sort` | 354 | 210 | 597 | 65% |
+| `primes` | 2,061 | 1,061 | 3,599 | 70% |
+
+The "before" column is not remembered, it is reproducible: `BP_ENABLE=0`
+pins the prediction to not-taken, which is exactly what the core did before
+the predictor existed.
+
+```bash
+BP=0 make programs     # baseline
+make programs          # with prediction
+```
 
 ### Where the cycles go
 
 Every cycle is accounted for by one identity:
 
 ```
-cycles = instructions + stalls + 2 x (taken branches + jumps) + pipeline fill
+cycles = instructions + stalls + 2 x mispredictions + pipeline fill
 ```
 
 | Program | Predicted | Actual |
 |---|---|---|
-| `hello` | 119 + 14 + 2x17 + 2 = 169 | 169 |
-| `fib` | 4385 + 31 + 2x484 + 2 = 5386 | 5386 |
-| `sort` | 1854 + 92 + 2x354 + 2 = 2656 | 2656 |
-| `primes` | 9331 + 76 + 2x2061 + 2 = 13531 | 13531 |
+| `hello` | 119 + 14 + 2x6 + 2 = 147 | 147 |
+| `fib` | 4385 + 31 + 2x288 + 2 = 4994 | 4994 |
+| `sort` | 1854 + 92 + 2x210 + 2 = 2368 | 2368 |
+| `primes` | 9331 + 76 + 2x1061 + 2 = 11531 | 11531 |
 
-Exact on all four. `program_tb.v` asserts this rather than leaving it as an
-observation: if the pipeline's valid bit were wrong and flushed instructions
-counted as retired, the residual would go negative and CPI would quietly
-look better than the core is. Forcing the valid bit high fails all four
-programs with `counter accounting is impossible`.
+Exact on all four, before and after. `program_tb.v` asserts this rather than
+leaving it as an observation: if the pipeline's valid bit were wrong and
+flushed instructions counted as retired, the residual would go negative and
+CPI would quietly look better than the core is. Forcing the valid bit high
+fails all four programs with `counter accounting is impossible`.
 
 ### What the numbers say
 
-Branches are the whole story. About **47% of branches are taken**, and each
-one costs two flushed instructions because branches resolve in EX. That is
-roughly 0.2 to 0.25 of the CPI above 1.0 — far more than stalls, which are
-almost free at well under 1% of cycles.
+**Stalls were never the problem.** Load-use stalls are well under 1% of
+cycles, so forwarding is doing its job and there is nothing to win there.
 
-Two things follow, and they are the next two pieces of work:
-
-- **Forwarding is doing its job.** Load-use stalls are rare, so there is
-  nothing to win there.
-- **A branch predictor is worth building.** Today the core effectively
-  predicts not-taken and is wrong 47% of the time. Even a simple 2-bit
-  predictor should take a visible bite out of CPI — and the numbers above
-  are the baseline it has to beat.
+**`fib` gains least, and that is informative.** It is the most recursive
+program and has the worst prediction accuracy at 66%. The BTB stores one
+target per PC, but a `ret` from a recursive function goes back to a
+different call site each time, so the remembered target is usually stale.
+That is the textbook case for a **return address stack**, and it is the
+next thing worth building — the numbers above say where to look.
 
 ## Design notes
 

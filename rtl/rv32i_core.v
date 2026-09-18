@@ -13,9 +13,9 @@
 // threaded through three places instead of one. Real logic (hazards,
 // decode, alignment) lives in its own module and is tested on its own.
 //
-// Branches and jumps resolve in EX, which costs two flushed instructions
-// when one is taken. Resolving earlier is a Phase 4 optimisation, together
-// with branch prediction.
+// Branches and jumps resolve in EX. Fetch guesses the path with a branch
+// predictor and EX checks the guess, so a taken branch costs nothing when
+// predicted correctly and two flushed instructions when it is not.
 //==========================================================================
 
 `default_nettype none
@@ -27,6 +27,8 @@ module rv32i_core #(
     parameter integer IMEM_WORDS = 4096,
     parameter integer DMEM_WORDS = 4096,
     parameter         IMEM_INIT  = "",
+    parameter integer BP_ENTRIES = 64,
+    parameter integer BP_ENABLE  = 1,   // 0 reproduces the always-not-taken baseline
     parameter         DMEM_INIT  = ""
 ) (
     input  wire        clk_i,
@@ -45,7 +47,7 @@ module rv32i_core #(
     output wire [63:0] perf_cycles_o,
     output wire [63:0] perf_instret_o,
     output wire [31:0] perf_stalls_o,      // cycles lost to load-use stalls
-    output wire [31:0] perf_redirects_o,   // taken branches and jumps
+    output wire [31:0] perf_mispredicts_o, // wrong guesses: 2 cycles each
     output wire [31:0] perf_branches_o,    // conditional branches executed
     output wire [31:0] perf_br_taken_o,    // of those, how many were taken
 
@@ -69,8 +71,8 @@ module rv32i_core #(
     wire [31:0] if_pc_plus4 = if_pc + 32'd4;
     wire [31:0] if_instr;
 
-    wire        ex_redirect;
-    wire [31:0] ex_target;
+    wire        ex_mispredict;
+    wire [31:0] ex_correct_pc;
 
     imem #(
         .WORDS     (IMEM_WORDS),
@@ -80,13 +82,50 @@ module rv32i_core #(
         .instr_o (if_instr)
     );
 
+    //----------------------------------------------------------------------
+    // Branch prediction happens here, before the instruction has even been
+    // decoded. That is the point: by the time EX knows this is a branch and
+    // where it goes, two later instructions have already been fetched.
+    //
+    // A prediction is a guess about the fetch path, never about results.
+    // EX checks every one of them, so a wrong guess costs the same two
+    // cycles the core paid unconditionally before -- and a right one costs
+    // nothing.
+    //----------------------------------------------------------------------
+    wire        bp_predict_taken;
+    wire        if_predict_taken;
+    wire [31:0] if_predict_target;
+    wire        bp_update;
+    wire        bp_update_taken;
+    wire [31:0] bp_update_pc, bp_update_target;
+
+    branch_predictor #(
+        .ENTRIES (BP_ENTRIES)
+    ) u_branch_predictor (
+        .clk_i            (clk_i),
+        .rst_i            (rst_i),
+        .pc_i             (if_pc),
+        .predict_taken_o  (bp_predict_taken),
+        .predict_target_o (if_predict_target),
+        .update_valid_i   (bp_update),
+        .update_pc_i      (bp_update_pc),
+        .update_taken_i   (bp_update_taken),
+        .update_target_i  (bp_update_target)
+    );
+
+    // Setting BP_ENABLE to 0 pins the prediction to not-taken, which is
+    // exactly what the core did before the predictor existed. The baseline
+    // the speedup is measured against is therefore reproducible rather than
+    // remembered.
+    assign if_predict_taken = (BP_ENABLE != 0) && bp_predict_taken;
+
     always @(posedge clk_i) begin
         if (rst_i)
             if_pc <= RESET_ADDR;
-        else if (ex_redirect)
-            if_pc <= ex_target;
+        else if (ex_mispredict)
+            if_pc <= ex_correct_pc;     // EX found the fetch path was wrong
         else if (!stall_if)
-            if_pc <= if_pc_plus4;
+            if_pc <= if_predict_taken ? if_predict_target : if_pc_plus4;
     end
 
     //======================================================================
@@ -106,17 +145,26 @@ module rv32i_core #(
     // direction.
     reg id_valid;
 
+    // The guess made when this instruction was fetched, carried alongside it
+    // so EX can check it against what actually happens.
+    reg        id_predict_taken;
+    reg [31:0] id_predict_target;
+
     always @(posedge clk_i) begin
         if (rst_i || flush_id) begin
             id_pc       <= 32'b0;
             id_pc_plus4 <= 32'b0;
             id_instr    <= `NOP;
             id_valid    <= 1'b0;
+            id_predict_taken  <= 1'b0;
+            id_predict_target <= 32'b0;
         end else if (!stall_id) begin
             id_pc       <= if_pc;
             id_pc_plus4 <= if_pc_plus4;
             id_instr    <= if_instr;
             id_valid    <= 1'b1;
+            id_predict_taken  <= if_predict_taken;
+            id_predict_target <= if_predict_target;
         end
     end
 
@@ -200,6 +248,8 @@ module rv32i_core #(
     reg                   ex_is_branch, ex_is_jump, ex_target_src;
     reg                   ex_is_ecall, ex_illegal;
     reg                   ex_valid;
+    reg                   ex_predict_taken;
+    reg [31:0]            ex_predict_target;
 
     always @(posedge clk_i) begin
         if (rst_i || flush_ex) begin
@@ -225,6 +275,8 @@ module rv32i_core #(
             ex_is_ecall   <= 1'b0;
             ex_illegal    <= 1'b0;
             ex_valid      <= 1'b0;
+            ex_predict_taken  <= 1'b0;
+            ex_predict_target <= 32'b0;
         end else begin
             ex_pc         <= id_pc;
             ex_pc_plus4   <= id_pc_plus4;
@@ -248,6 +300,8 @@ module rv32i_core #(
             ex_is_ecall   <= id_is_ecall;
             ex_illegal    <= id_illegal;
             ex_valid      <= id_valid;
+            ex_predict_taken  <= id_predict_taken;
+            ex_predict_target <= id_predict_target;
         end
     end
 
@@ -304,9 +358,36 @@ module rv32i_core #(
     wire [31:0] ex_target_pc   = ex_pc + ex_imm;
     wire [31:0] ex_target_jalr = (ex_fwd_a + ex_imm) & ~32'd1;
 
-    assign ex_target   = (ex_target_src == `TGT_RS1) ? ex_target_jalr
-                                                     : ex_target_pc;
-    assign ex_redirect = ex_is_jump || ex_branch_taken;
+    wire [31:0] ex_actual_target = (ex_target_src == `TGT_RS1) ? ex_target_jalr
+                                                               : ex_target_pc;
+    wire        ex_actual_taken  = ex_is_jump || ex_branch_taken;
+
+    //----------------------------------------------------------------------
+    // Check the fetch stage's guess.
+    //
+    // Two ways to be wrong, and both matter:
+    //   - the direction was wrong, taken either way round;
+    //   - the direction was right but the address was not, which is how an
+    //     indirect jump through a changed register goes astray.
+    //
+    // The second case also catches a prediction made for an instruction
+    // that turns out not to be a branch at all -- two unrelated PCs can
+    // collide in the BTB, and then a plain ADD is fetched down a jump
+    // target. It resolves here as predicted-taken against actually-not,
+    // and the pipeline is put back on PC+4.
+    //----------------------------------------------------------------------
+    assign ex_mispredict = ex_valid &&
+        ((ex_actual_taken != ex_predict_taken) ||
+         (ex_actual_taken && (ex_actual_target != ex_predict_target)));
+
+    assign ex_correct_pc = ex_actual_taken ? ex_actual_target : ex_pc_plus4;
+
+    // Teach the predictor, whether it guessed right or wrong: a correct
+    // prediction still needs its counter pushed further towards confidence.
+    assign bp_update        = ex_valid && (ex_is_branch || ex_is_jump);
+    assign bp_update_pc     = ex_pc;
+    assign bp_update_taken  = ex_actual_taken;
+    assign bp_update_target = ex_actual_target;
 
     //======================================================================
     // EX/MEM pipeline register
@@ -478,7 +559,7 @@ module rv32i_core #(
         .mem_reg_write_i (mem_reg_write),
         .wb_rd_addr_i    (wb_rd_addr),
         .wb_reg_write_i  (wb_reg_write),
-        .pc_redirect_i   (ex_redirect),
+        .pc_redirect_i   (ex_mispredict),
         .stall_if_o      (stall_if),
         .stall_id_o      (stall_id),
         .flush_id_o      (flush_id),
@@ -502,7 +583,7 @@ module rv32i_core #(
     reg [63:0] perf_cycles;
     reg [63:0] perf_instret;
     reg [31:0] perf_stalls;
-    reg [31:0] perf_redirects;
+    reg [31:0] perf_mispredicts;
     reg [31:0] perf_branches;
     reg [31:0] perf_br_taken;
 
@@ -511,7 +592,7 @@ module rv32i_core #(
             perf_cycles    <= 64'b0;
             perf_instret   <= 64'b0;
             perf_stalls    <= 32'b0;
-            perf_redirects <= 32'b0;
+            perf_mispredicts <= 32'b0;
             perf_branches  <= 32'b0;
             perf_br_taken  <= 32'b0;
         end else begin
@@ -526,11 +607,12 @@ module rv32i_core #(
                 perf_stalls <= perf_stalls + 32'd1;
             end
 
-            // A taken branch or a jump. Each one costs two flushed
-            // instructions, so this number times two is the control-flow
-            // penalty in cycles.
-            if (ex_redirect) begin
-                perf_redirects <= perf_redirects + 32'd1;
+            // A wrong guess about the fetch path. Each one costs two
+            // flushed instructions, so this number times two is the
+            // control-flow penalty in cycles. A correct prediction, taken
+            // or not, costs nothing and is not counted here.
+            if (ex_mispredict) begin
+                perf_mispredicts <= perf_mispredicts + 32'd1;
             end
 
             // Every conditional branch reaching EX, taken or not, and how
@@ -538,7 +620,7 @@ module rv32i_core #(
             // branch predictor has to beat -- always-not-taken is what this
             // core effectively does today.
             //
-            // Counted separately from perf_redirects because that one also
+            // Counted separately from perf_mispredicts because that one also
             // includes jumps, which are unconditional and have nothing to
             // predict.
             if (ex_valid && ex_is_branch) begin
@@ -553,7 +635,7 @@ module rv32i_core #(
     assign perf_cycles_o    = perf_cycles;
     assign perf_instret_o   = perf_instret;
     assign perf_stalls_o    = perf_stalls;
-    assign perf_redirects_o = perf_redirects;
+    assign perf_mispredicts_o = perf_mispredicts;
     assign perf_branches_o  = perf_branches;
     assign perf_br_taken_o  = perf_br_taken;
 

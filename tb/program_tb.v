@@ -22,6 +22,8 @@
 
 module program_tb;
 
+    parameter integer BP_ENABLE = 1;    // set to 0 for the no-predictor baseline
+
     localparam integer MEM_WORDS  = 16384;      // 64 KiB each
     localparam integer MAX_CYCLES = 2000000;
 
@@ -30,7 +32,7 @@ module program_tb;
     wire        uart_valid;
     wire [7:0]  uart_data;
     wire [63:0] perf_cycles, perf_instret;
-    wire [31:0] perf_stalls, perf_redirects, perf_branches, perf_br_taken;
+    wire [31:0] perf_stalls, perf_mispredicts, perf_branches, perf_br_taken;
     wire [31:0] dbg_pc;
     wire        dbg_ecall;
     wire        dbg_illegal;
@@ -51,7 +53,8 @@ module program_tb;
 
     rv32i_core #(
         .IMEM_WORDS (MEM_WORDS),
-        .DMEM_WORDS (MEM_WORDS)
+        .DMEM_WORDS (MEM_WORDS),
+        .BP_ENABLE  (BP_ENABLE)
     ) dut (
         .clk_i         (clk),
         .rst_i         (rst),
@@ -60,7 +63,7 @@ module program_tb;
         .perf_cycles_o    (perf_cycles),
         .perf_instret_o   (perf_instret),
         .perf_stalls_o    (perf_stalls),
-        .perf_redirects_o (perf_redirects),
+        .perf_mispredicts_o (perf_mispredicts),
         .perf_branches_o  (perf_branches),
         .perf_br_taken_o  (perf_br_taken),
         .dbg_pc_o      (dbg_pc),
@@ -158,7 +161,7 @@ module program_tb;
             // valid bit were wrong and flushed instructions were counted as
             // retired, instret would rise, the residual would go negative,
             // and CPI would quietly look better than the core is.
-            accounted = perf_instret + perf_stalls + (2 * perf_redirects);
+            accounted = perf_instret + perf_stalls + (2 * perf_mispredicts);
 
             if (perf_cycles < accounted) begin
                 $display("  %0s: counter accounting is impossible -- %0d cycles but %0d accounted",
@@ -185,11 +188,11 @@ module program_tb;
             // Distinct prefix: the program's own output is echoed to stdout
             // too, and a program that prints "fib:" would otherwise be
             // mistaken for this line by anything grepping for the name.
-            $display("STATS: %0d cyc, %0d instr, CPI %0d.%02d, %0d stall, %0d br (%0d taken), %0d jmp",
+            $display("STATS: %0d cyc, %0d instr, CPI %0d.%02d, %0d stall, %0d br (%0d taken), %0d mispred",
                      perf_cycles, perf_instret,
                      cpi_x100 / 64'd100, cpi_x100 % 64'd100,
                      perf_stalls, perf_branches, perf_br_taken,
-                     perf_redirects - perf_br_taken);
+                     perf_mispredicts);
             $display("RESULT: PASS");
         end
 
