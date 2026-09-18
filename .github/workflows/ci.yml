@@ -27,3 +27,26 @@ jobs:
 
       - name: Run self-checking testbenches
         run: make test
+
+  conformance:
+    name: Official riscv-tests (rv32ui)
+    runs-on: ubuntu-latest
+
+    steps:
+      # The test sources live in a submodule, so they have to come down too.
+      - uses: actions/checkout@v5
+        with:
+          submodules: true
+
+      - name: Install Icarus Verilog and a RISC-V toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y iverilog gcc-riscv64-unknown-elf
+
+      - name: Show tool versions
+        run: |
+          iverilog -V | head -1
+          riscv64-unknown-elf-gcc --version | head -1
+
+      - name: Run the official conformance suite
+        run: make riscv-tests

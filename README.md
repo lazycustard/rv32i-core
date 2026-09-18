@@ -111,8 +111,34 @@ this caveat goes away.
 
 ### Results
 
-Not yet run — the toolchain is still being set up. This section will carry
-the per-test table once it has actually executed, and not before.
+**40 of 40 rv32ui tests pass**, 2 skipped for the reasons above.
+
+```
+riscv-tests rv32ui: 40/40 PASSED  (2 skipped)
+```
+
+| Group | Tests |
+|---|---|
+| Arithmetic | `add` `addi` `sub` |
+| Logical | `and` `andi` `or` `ori` `xor` `xori` |
+| Shifts | `sll` `slli` `srl` `srli` `sra` `srai` |
+| Comparison | `slt` `slti` `sltiu` `sltu` |
+| Branches | `beq` `bne` `blt` `bge` `bltu` `bgeu` |
+| Jumps | `jal` `jalr` |
+| Upper immediate | `lui` `auipc` |
+| Loads | `lb` `lbu` `lh` `lhu` `lw` |
+| Stores | `sb` `sh` `sw` |
+| Mixed access | `ld_st` `st_ld` `simple` |
+
+The suite was checked for teeth the same way the local one was: changing
+`sra` to shift in zeros instead of the sign bit made `sra` and `srai` fail
+and report `test case 3 failed`, while `srl` kept passing. `lui` failed too
+— not a false positive, since the official LUI test uses `sra` to verify
+sign extension:
+
+```asm
+TEST_CASE( 3, x1, 0xfffff800, lui x1, 0xfffff; sra x1,x1,1 );
+```
 
 ## Design notes
 
@@ -156,7 +182,7 @@ sim/                 simulation output (git-ignored)
 
 - [x] **Phase 0** — toolchain, test harness, CI
 - [x] **Phase 1** — complete and correct RV32I instruction set
-- [ ] **Phase 2** — official [riscv-tests](https://github.com/riscv-software-src/riscv-tests) conformance suite
+- [x] **Phase 2** — official [riscv-tests](https://github.com/riscv-software-src/riscv-tests) conformance suite
 - [ ] **Phase 3** — run compiled C programs, UART output
 - [ ] **Phase 4** — performance counters, CPI, synthesis + timing numbers
 - [ ] **Phase 5** — block RAM inference, timing closure on Artix-7

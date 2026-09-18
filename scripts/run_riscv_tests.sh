@@ -171,7 +171,9 @@ for SRC in "$ISA_DIR"/rv32ui/*.S; do
         PASSED=$((PASSED + 1))
     else
         printf '[ FAIL ] %-10s\n' "$NAME"
-        grep -v "^RESULT:" "$LOG" | sed 's/^/    /' | head -6
+        # The $readmemh "not enough words" warning is expected: a test
+        # program is always smaller than the memory it is loaded into.
+        grep -v -e "^RESULT:" -e "Not enough words in the file" "$LOG" | sed 's/^/    /' | head -6
         FAILED=$((FAILED + 1))
         FAILED_NAMES="$FAILED_NAMES $NAME"
     fi
