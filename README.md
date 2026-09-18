@@ -50,8 +50,8 @@ non-zero on any failure, so this works unchanged in CI.
 | Upper immediate | `lui` `auipc` | decoded + immediate verified |
 | Jumps | `jal` `jalr` | decoded + immediate verified |
 | Branches | `beq` `bne` `blt` `bge` `bltu` `bgeu` | decoded + comparator verified |
-| Loads | `lb` `lh` `lw` `lbu` `lhu` | decoded |
-| Stores | `sb` `sh` `sw` | decoded + immediate verified |
+| Loads | `lb` `lh` `lw` `lbu` `lhu` | decoded + load path verified |
+| Stores | `sb` `sh` `sw` | decoded + store path verified |
 | System | `ecall` `ebreak` `fence` | decoded and flagged |
 
 ## Design notes
@@ -70,6 +70,12 @@ dedicated comparator.
 
 **LUI goes through the ALU as a pass-through** (`ALU_PASS_B`) rather than
 needing an extra writeback source.
+
+**Memory reads are asynchronous, for now.** That keeps the fetch and memory
+stages simple while the pipeline control logic is being brought up. It also
+means the memories infer distributed LUT RAM rather than block RAM, which
+will not fit on an FPGA at any useful depth. Converting them to synchronous
+reads is Phase 5 work and is flagged in the source.
 
 ## Layout
 
