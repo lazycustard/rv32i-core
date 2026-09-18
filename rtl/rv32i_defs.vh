@@ -37,4 +37,56 @@
 // in the register file untouched rather than added to anything.
 `define ALU_PASS_B 4'b1001
 
+//--------------------------------------------------------------------------
+// Opcodes (instr[6:0]). RV32I only defines these eleven.
+//--------------------------------------------------------------------------
+`define OP_LOAD     7'b0000011
+`define OP_MISC_MEM 7'b0001111   // fence
+`define OP_IMM      7'b0010011   // addi, slti, andi, slli, ...
+`define OP_AUIPC    7'b0010111
+`define OP_STORE    7'b0100011
+`define OP_REG      7'b0110011   // add, sub, sll, ...
+`define OP_LUI      7'b0110111
+`define OP_BRANCH   7'b1100011
+`define OP_JALR     7'b1100111
+`define OP_JAL      7'b1101111
+`define OP_SYSTEM   7'b1110011   // ecall, ebreak
+
+//--------------------------------------------------------------------------
+// Immediate formats. RV32I scrambles the immediate bits differently in each
+// instruction format, so the selector needs five values -- which does not
+// fit in the 2-bit field a subset implementation can get away with.
+//--------------------------------------------------------------------------
+`define IMM_SEL_W 3
+
+`define IMM_I 3'd0   // instr[31:20]                       sign-extended
+`define IMM_S 3'd1   // instr[31:25] | instr[11:7]         sign-extended
+`define IMM_B 3'd2   // 13-bit, bit 0 always 0             sign-extended
+`define IMM_U 3'd3   // instr[31:12] << 12                 no extension
+`define IMM_J 3'd4   // 21-bit, bit 0 always 0             sign-extended
+
+//--------------------------------------------------------------------------
+// Branch conditions (funct3 of a BRANCH instruction)
+//--------------------------------------------------------------------------
+`define BR_EQ  3'b000
+`define BR_NE  3'b001
+`define BR_LT  3'b100   // signed
+`define BR_GE  3'b101   // signed
+`define BR_LTU 3'b110   // unsigned
+`define BR_GEU 3'b111   // unsigned
+
+//--------------------------------------------------------------------------
+// Load / store width (funct3 of a LOAD or STORE instruction)
+//--------------------------------------------------------------------------
+`define LS_B  3'b000   // byte,     sign-extended on load
+`define LS_H  3'b001   // halfword, sign-extended on load
+`define LS_W  3'b010   // word
+`define LS_BU 3'b100   // byte,     zero-extended on load
+`define LS_HU 3'b101   // halfword, zero-extended on load
+
+//--------------------------------------------------------------------------
+// A canonical NOP: addi x0, x0, 0. Used to fill flushed pipeline slots.
+//--------------------------------------------------------------------------
+`define NOP 32'h0000_0013
+
 `endif

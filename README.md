@@ -47,11 +47,11 @@ non-zero on any failure, so this works unchanged in CI.
 | Group | Instructions | Status |
 |---|---|---|
 | ALU (register/immediate) | `add` `sub` `sll` `slt` `sltu` `xor` `srl` `sra` `or` `and` | ALU verified |
-| Upper immediate | `lui` `auipc` | not yet |
-| Jumps | `jal` `jalr` | not yet |
-| Branches | `beq` `bne` `blt` `bge` `bltu` `bgeu` | not yet |
+| Upper immediate | `lui` `auipc` | U-type immediate verified |
+| Jumps | `jal` `jalr` | J-type immediate verified |
+| Branches | `beq` `bne` `blt` `bge` `bltu` `bgeu` | comparator verified |
 | Loads | `lb` `lh` `lw` `lbu` `lhu` | not yet |
-| Stores | `sb` `sh` `sw` | not yet |
+| Stores | `sb` `sh` `sw` | S-type immediate verified |
 | System | `ecall` `ebreak` `fence` | not yet |
 
 ## Design notes
@@ -85,7 +85,7 @@ sim/        build output (git-ignored)
 ## Roadmap
 
 - [x] **Phase 0** — toolchain, test harness, CI
-- [ ] **Phase 1** — complete and correct RV32I instruction set
+- [ ] **Phase 1** (in progress) — complete and correct RV32I instruction set
 - [ ] **Phase 2** — official [riscv-tests](https://github.com/riscv-software-src/riscv-tests) conformance suite
 - [ ] **Phase 3** — run compiled C programs, UART output
 - [ ] **Phase 4** — performance counters, CPI, synthesis + timing numbers
