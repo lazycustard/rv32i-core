@@ -6,6 +6,7 @@
 #   make test TB=alu    run only testbenches matching "alu"
 #   make wave TB=alu    open the waveform for one testbench in GTKWave
 #   make lint       syntax + width check, no simulation
+#   make riscv-tests    official riscv-tests suite (needs RISC-V GCC)
 #   make clean      remove build products
 #
 # Everything is delegated to scripts/run_tests.sh so that there is exactly
@@ -19,7 +20,7 @@ TB_DIR  := tb
 SIM_DIR := sim
 TB      ?=
 
-.PHONY: all test lint wave clean
+.PHONY: all test riscv-tests lint wave clean
 
 all: test
 
@@ -37,5 +38,10 @@ wave:
 	gtkwave $(SIM_DIR)/tb_$(TB).vcd
 
 clean:
-	@rm -rf $(SIM_DIR)
+	@rm -rf $(SIM_DIR) tests/build
 	@echo "cleaned"
+
+# Official riscv-tests conformance suite. Needs a RISC-V GCC toolchain;
+# see scripts/run_riscv_tests.sh for install hints.
+riscv-tests:
+	@bash scripts/run_riscv_tests.sh $(TB)

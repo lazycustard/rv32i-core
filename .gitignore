@@ -1,3 +1,6 @@
+# Test build products
+tests/build/
+
 # Simulation build products
 sim/
 *.vvp
