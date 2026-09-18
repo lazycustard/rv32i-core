@@ -8,6 +8,7 @@
 #   make lint       syntax + width check, no simulation
 #   make riscv-tests    official riscv-tests suite (needs RISC-V GCC)
 #   make programs       compile and run the C programs (needs RISC-V GCC)
+#   make synth          Vivado synthesis: LUTs, Fmax, critical path
 #   make clean      remove build products
 #
 # Everything is delegated to scripts/run_tests.sh so that there is exactly
@@ -21,7 +22,7 @@ TB_DIR  := tb
 SIM_DIR := sim
 TB      ?=
 
-.PHONY: all test riscv-tests programs lint wave clean
+.PHONY: all test riscv-tests programs synth lint wave clean
 
 all: test
 
@@ -39,7 +40,7 @@ wave:
 	gtkwave $(SIM_DIR)/tb_$(TB).vcd
 
 clean:
-	@rm -rf $(SIM_DIR) tests/build
+	@rm -rf $(SIM_DIR) tests/build build reports
 	@echo "cleaned"
 
 # Official riscv-tests conformance suite. Needs a RISC-V GCC toolchain;
@@ -51,3 +52,8 @@ riscv-tests:
 # compare their output. Needs a RISC-V GCC toolchain.
 programs:
 	@bash scripts/run_programs.sh $(TB)
+
+# Vivado synthesis and implementation. Needs Vivado on PATH; no board
+# required. Produces utilisation, Fmax and the critical path in reports/.
+synth:
+	@vivado -mode batch -source scripts/build.tcl -nojournal -nolog

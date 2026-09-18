@@ -12,7 +12,7 @@ sim/
 # GTKWave
 *.gtkw.bak
 
-# Vivado (project mode leaves a lot of noise; we use non-project Tcl builds)
+# Vivado output (we use non-project Tcl builds; nothing here is a source)
 *.jou
 *.log
 *.str
