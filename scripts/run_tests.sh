@@ -71,7 +71,7 @@ for TB in tb/tb_*.v; do
 
     # -g2012 enables Verilog-2005/SystemVerilog-lite constructs.
     # -Wall surfaces width mismatches and implicit nets early.
-    if ! "$IVERILOG" -g2012 -Wall -I rtl -o "$OUT" rtl/*.v "$TB" > "$LOG" 2>&1; then
+    if ! "$IVERILOG" -g2012 -Wall -I rtl -I tb -o "$OUT" rtl/*.v "$TB" > "$LOG" 2>&1; then
         echo "[ BUILD FAIL ] $NAME"
         sed 's/^/    /' "$LOG"
         FAILED=$((FAILED + 1))

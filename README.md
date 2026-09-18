@@ -46,13 +46,13 @@ non-zero on any failure, so this works unchanged in CI.
 
 | Group | Instructions | Status |
 |---|---|---|
-| ALU (register/immediate) | `add` `sub` `sll` `slt` `sltu` `xor` `srl` `sra` `or` `and` | decoded + ALU verified |
-| Upper immediate | `lui` `auipc` | decoded + immediate verified |
-| Jumps | `jal` `jalr` | decoded + immediate verified |
-| Branches | `beq` `bne` `blt` `bge` `bltu` `bgeu` | decoded + comparator verified |
-| Loads | `lb` `lh` `lw` `lbu` `lhu` | decoded + load path verified |
-| Stores | `sb` `sh` `sw` | decoded + store path verified |
-| System | `ecall` `ebreak` `fence` | decoded and flagged |
+| ALU (register/immediate) | `add` `sub` `sll` `slt` `sltu` `xor` `srl` `sra` `or` `and` | verified in core |
+| Upper immediate | `lui` `auipc` | verified in core |
+| Jumps | `jal` `jalr` | verified in core |
+| Branches | `beq` `bne` `blt` `bge` `bltu` `bgeu` | verified in core |
+| Loads | `lb` `lh` `lw` `lbu` `lhu` | verified in core |
+| Stores | `sb` `sh` `sw` | verified in core |
+| System | `ecall` `ebreak` `fence` | decoded; traps are Phase 6 |
 
 ## Design notes
 
@@ -91,7 +91,7 @@ sim/        build output (git-ignored)
 ## Roadmap
 
 - [x] **Phase 0** — toolchain, test harness, CI
-- [ ] **Phase 1** (in progress) — complete and correct RV32I instruction set
+- [x] **Phase 1** — complete and correct RV32I instruction set
 - [ ] **Phase 2** — official [riscv-tests](https://github.com/riscv-software-src/riscv-tests) conformance suite
 - [ ] **Phase 3** — run compiled C programs, UART output
 - [ ] **Phase 4** — performance counters, CPI, synthesis + timing numbers
