@@ -152,10 +152,10 @@ The core runs C compiled by GCC and prints through a memory-mapped UART:
 ```
 $ make programs
 
-[ PASS ] fib           4994 cyc, 4385 instr, CPI 1.13, 31 stall, 639 br (284 taken), 288 mispred
-[ PASS ] hello         147 cyc, 119 instr, CPI 1.23, 14 stall, 29 br (14 taken), 6 mispred
-[ PASS ] primes        11531 cyc, 9331 instr, CPI 1.23, 76 stall, 2892 br (1354 taken), 1061 mispred
-[ PASS ] sort          2368 cyc, 1854 instr, CPI 1.27, 92 stall, 470 br (227 taken), 210 mispred
+[ PASS ] fib           4934 cyc, 4385 instr, CPI 1.12, 31 stall, 639 br (284 taken), 258 mispred
+[ PASS ] hello         145 cyc, 119 instr, CPI 1.21, 14 stall, 29 br (14 taken), 5 mispred
+[ PASS ] primes        11353 cyc, 9331 instr, CPI 1.21, 76 stall, 2892 br (1354 taken), 972 mispred
+[ PASS ] sort          2314 cyc, 1854 instr, CPI 1.24, 92 stall, 470 br (227 taken), 183 mispred
 
  programs: 4/4 PASSED
 ```
@@ -163,7 +163,7 @@ $ make programs
 ```
 $ make programs TB=primes
 
-[ PASS ] primes        11531 cyc, 9331 instr, CPI 1.23, 76 stall, 2892 br (1354 taken), 1061 mispred
+[ PASS ] primes        11353 cyc, 9331 instr, CPI 1.21, 76 stall, 2892 br (1354 taken), 972 mispred
            | primes: 2 3 5 7 11 13 17 19 23 29 31 37 41 43 47
            | count: 15
 ```
@@ -223,23 +223,44 @@ because the core only learned where a branch went once it reached EX. A
 64-entry branch target buffer with 2-bit direction counters now guesses in
 the fetch stage, and EX checks the guess.
 
-| Program | Cycles before | Cycles after | CPI before | CPI after | Saved |
+Two structures, added in that order:
+
+- a **64-entry BTB** with 2-bit direction counters, which remembers where
+  each branch PC went last time;
+- an **8-entry return address stack**, because a BTB cannot predict a
+  function return. The same `ret` instruction goes back to whichever call
+  site invoked it, so "where it went last time" is the wrong question. A
+  call pushes the address it will come back to, and a return pops it.
+
+| Program | No prediction | + BTB | + RAS | CPI | Total saved |
 |---|---|---|---|---|---|
-| `hello` | 169 | 147 | 1.42 | **1.23** | 13.0% |
-| `fib` | 5,386 | 4,994 | 1.22 | **1.13** | 7.3% |
-| `sort` | 2,656 | 2,368 | 1.43 | **1.27** | 10.8% |
-| `primes` | 13,531 | 11,531 | 1.45 | **1.23** | 14.8% |
+| `hello` | 169 | 147 | **145** | 1.42 → **1.21** | 14.2% |
+| `fib` | 5,386 | 4,994 | **4,934** | 1.22 → **1.12** | 8.4% |
+| `sort` | 2,656 | 2,368 | **2,314** | 1.43 → **1.24** | 12.9% |
+| `primes` | 13,531 | 11,531 | **11,353** | 1.45 → **1.21** | 16.1% |
 
 | Program | Mispredicts before | After | Control transfers | Accuracy |
 |---|---|---|---|---|
-| `hello` | 17 | 6 | 32 | 81% |
-| `fib` | 484 | 288 | 839 | 66% |
-| `sort` | 354 | 210 | 597 | 65% |
-| `primes` | 2,061 | 1,061 | 3,599 | 70% |
+| `hello` | 17 | 5 | 32 | 84% |
+| `fib` | 484 | 258 | 839 | 69% |
+| `sort` | 354 | 183 | 597 | 69% |
+| `primes` | 2,061 | 972 | 3,599 | 73% |
 
 The "before" column is not remembered, it is reproducible: `BP_ENABLE=0`
 pins the prediction to not-taken, which is exactly what the core did before
 the predictor existed.
+
+The return stack is updated in fetch, speculatively, rather than in EX once
+the instruction is known to be real — and it has to be. Unwinding a
+recursion is a run of returns with an instruction or two between them, so a
+second return is fetched before the first reaches EX; updating in EX leaves
+it reading a stale top of stack. Moving the update to fetch removed 88
+mispredictions from `primes` alone.
+
+The cost is that a mispredicted path can push or pop entries that should
+never have existed, and there is no checkpoint to restore from. That is an
+accuracy loss and nothing else: EX checks every prediction, so a drifted
+stack produces a slower result, never a wrong one.
 
 ```bash
 BP=0 make programs     # baseline
@@ -256,10 +277,10 @@ cycles = instructions + stalls + 2 x mispredictions + pipeline fill
 
 | Program | Predicted | Actual |
 |---|---|---|
-| `hello` | 119 + 14 + 2x6 + 2 = 147 | 147 |
-| `fib` | 4385 + 31 + 2x288 + 2 = 4994 | 4994 |
-| `sort` | 1854 + 92 + 2x210 + 2 = 2368 | 2368 |
-| `primes` | 9331 + 76 + 2x1061 + 2 = 11531 | 11531 |
+| `hello` | 119 + 14 + 2x5 + 2 = 145 | 145 |
+| `fib` | 4385 + 31 + 2x258 + 2 = 4934 | 4934 |
+| `sort` | 1854 + 92 + 2x183 + 2 = 2314 | 2314 |
+| `primes` | 9331 + 76 + 2x972 + 2 = 11353 | 11353 |
 
 Exact on all four, before and after. `program_tb.v` asserts this rather than
 leaving it as an observation: if the pipeline's valid bit were wrong and
@@ -272,12 +293,18 @@ fails all four programs with `counter accounting is impossible`.
 **Stalls were never the problem.** Load-use stalls are well under 1% of
 cycles, so forwarding is doing its job and there is nothing to win there.
 
-**`fib` gains least, and that is informative.** It is the most recursive
-program and has the worst prediction accuracy at 66%. The BTB stores one
-target per PC, but a `ret` from a recursive function goes back to a
-different call site each time, so the remembered target is usually stale.
-That is the textbook case for a **return address stack**, and it is the
-next thing worth building — the numbers above say where to look.
+**`fib` still gains least, and that is informative.** The return stack
+fixed its returns, but 69% accuracy means what remains is conditional
+branches, not returns: recursive Fibonacci turns on `n < 2`, which
+alternates in a pattern a per-branch 2-bit counter cannot learn. Neither a
+bigger BTB nor a deeper stack helps there. It would take a history-based
+predictor, one that correlates a branch with the outcomes of recent ones —
+which is where this would go next.
+
+**The return stack's depth turned out not to matter.** Raising it from 8 to
+16 and then 32 changed nothing at all, which ruled out the obvious first
+theory — that `fib`'s recursion was simply deeper than the stack. The
+actual limit was *when* the stack was updated, not how big it was.
 
 ## Design notes
 

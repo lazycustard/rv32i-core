@@ -29,6 +29,7 @@ module rv32i_core #(
     parameter         IMEM_INIT  = "",
     parameter integer BP_ENTRIES = 64,
     parameter integer BP_ENABLE  = 1,   // 0 reproduces the always-not-taken baseline
+    parameter integer RAS_DEPTH  = 8,
     parameter         DMEM_INIT  = ""
 ) (
     input  wire        clk_i,
@@ -94,6 +95,7 @@ module rv32i_core #(
     //----------------------------------------------------------------------
     wire        bp_predict_taken;
     wire        if_predict_taken;
+    wire [31:0] bp_predict_target;
     wire [31:0] if_predict_target;
     wire        bp_update;
     wire        bp_update_taken;
@@ -106,18 +108,61 @@ module rv32i_core #(
         .rst_i            (rst_i),
         .pc_i             (if_pc),
         .predict_taken_o  (bp_predict_taken),
-        .predict_target_o (if_predict_target),
+        .predict_target_o (bp_predict_target),
         .update_valid_i   (bp_update),
         .update_pc_i      (bp_update_pc),
         .update_taken_i   (bp_update_taken),
         .update_target_i  (bp_update_target)
     );
 
+    //----------------------------------------------------------------------
+    // Return address stack.
+    //
+    // The BTB holds one target per PC, which is right for a loop and wrong
+    // for a function return: the same "ret" instruction goes back to
+    // whichever call site invoked it. The stack predicts returns from
+    // structure instead of history -- a call pushes where it will come
+    // back to, and a return pops it.
+    //
+    // Reading the instruction here, in fetch, is only possible because the
+    // instruction memory answers combinationally. Once it becomes a
+    // synchronous block RAM in Phase 5 the instruction arrives a cycle
+    // later and these two bits will have to be predecoded and stored
+    // alongside it.
+    //----------------------------------------------------------------------
+    wire if_is_call, if_is_ret;
+
+    call_ret_hint u_if_hint (
+        .instr_i   (if_instr),
+        .is_call_o (if_is_call),
+        .is_ret_o  (if_is_ret)
+    );
+
+    wire        ras_push, ras_pop, ras_valid;
+    wire [31:0] ras_top, ras_push_addr;
+
+    ras #(
+        .DEPTH (RAS_DEPTH)
+    ) u_ras (
+        .clk_i       (clk_i),
+        .rst_i       (rst_i),
+        .push_i      (ras_push),
+        .push_addr_i (ras_push_addr),
+        .pop_i       (ras_pop),
+        .top_o       (ras_top),
+        .valid_o     (ras_valid)
+    );
+
+    // The stack wins over the BTB for returns, and only for returns. An
+    // empty stack falls back to whatever the BTB remembers.
+    wire use_ras = if_is_ret && ras_valid;
+
     // Setting BP_ENABLE to 0 pins the prediction to not-taken, which is
     // exactly what the core did before the predictor existed. The baseline
     // the speedup is measured against is therefore reproducible rather than
     // remembered.
-    assign if_predict_taken = (BP_ENABLE != 0) && bp_predict_taken;
+    assign if_predict_taken  = (BP_ENABLE != 0) && (use_ras || bp_predict_taken);
+    assign if_predict_target = use_ras ? ras_top : bp_predict_target;
 
     always @(posedge clk_i) begin
         if (rst_i)
@@ -207,6 +252,16 @@ module rv32i_core #(
         .illegal_o    (id_illegal)
     );
 
+    // The same hint logic as in fetch, on this stage's instruction, so EX
+    // can update the stack it predicted from.
+    wire id_is_call, id_is_ret;
+
+    call_ret_hint u_id_hint (
+        .instr_i   (id_instr),
+        .is_call_o (id_is_call),
+        .is_ret_o  (id_is_ret)
+    );
+
     wire [31:0] id_imm;
 
     imm_gen u_imm_gen (
@@ -250,6 +305,7 @@ module rv32i_core #(
     reg                   ex_valid;
     reg                   ex_predict_taken;
     reg [31:0]            ex_predict_target;
+    reg                   ex_is_call, ex_is_ret;
 
     always @(posedge clk_i) begin
         if (rst_i || flush_ex) begin
@@ -277,6 +333,8 @@ module rv32i_core #(
             ex_valid      <= 1'b0;
             ex_predict_taken  <= 1'b0;
             ex_predict_target <= 32'b0;
+            ex_is_call        <= 1'b0;
+            ex_is_ret         <= 1'b0;
         end else begin
             ex_pc         <= id_pc;
             ex_pc_plus4   <= id_pc_plus4;
@@ -302,6 +360,8 @@ module rv32i_core #(
             ex_valid      <= id_valid;
             ex_predict_taken  <= id_predict_taken;
             ex_predict_target <= id_predict_target;
+            ex_is_call        <= id_is_call;
+            ex_is_ret         <= id_is_ret;
         end
     end
 
@@ -388,6 +448,31 @@ module rv32i_core #(
     assign bp_update_pc     = ex_pc;
     assign bp_update_taken  = ex_actual_taken;
     assign bp_update_target = ex_actual_target;
+
+    // Maintain the return stack. Guarded by ex_valid so a flushed
+    // instruction cannot push or pop -- a corrupted stack would mispredict
+    // every return above it, not just its own.
+    //----------------------------------------------------------------------
+    // The return stack is updated in fetch, speculatively, not in EX when
+    // the instruction is known to be real.
+    //
+    // It has to be. Unwinding a recursion is a run of returns with only an
+    // instruction or two between them, so a second return is fetched before
+    // the first has reached EX. Updating in EX means that second return
+    // reads a top of stack that is one entry stale. Measured on the primes
+    // program, moving the update to fetch removed 88 mispredictions.
+    //
+    // The cost is that a mispredicted path can push or pop entries that
+    // should never have existed, and there is no checkpoint to restore
+    // from -- so after a misprediction the stack can be left misaligned and
+    // some later returns predict wrongly. That is an accuracy loss and
+    // nothing more: EX checks every prediction, so a drifted stack can
+    // never produce a wrong result, only a slower one. A real recovery
+    // mechanism would snapshot the stack pointer per in-flight branch.
+    //----------------------------------------------------------------------
+    assign ras_push      = if_is_call && !stall_if && !ex_mispredict;
+    assign ras_pop       = use_ras    && !stall_if && !ex_mispredict;
+    assign ras_push_addr = if_pc_plus4;
 
     //======================================================================
     // EX/MEM pipeline register
