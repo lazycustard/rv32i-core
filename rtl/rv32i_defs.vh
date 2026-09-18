@@ -89,4 +89,26 @@
 //--------------------------------------------------------------------------
 `define NOP 32'h0000_0013
 
+//--------------------------------------------------------------------------
+// Datapath control encodings
+//--------------------------------------------------------------------------
+
+// ALU operand A
+`define SRC_A_RS1 1'b0
+`define SRC_A_PC  1'b1   // AUIPC computes PC + imm
+
+// ALU operand B
+`define SRC_B_RS2 1'b0
+`define SRC_B_IMM 1'b1
+
+// What gets written back to rd
+`define WB_SEL_W 2
+`define WB_ALU 2'd0
+`define WB_MEM 2'd1   // loads
+`define WB_PC4 2'd2   // JAL and JALR save the return address
+
+// Where a taken branch or jump gets its base address
+`define TGT_PC  1'b0   // branches and JAL: PC + imm
+`define TGT_RS1 1'b1   // JALR: rs1 + imm, with bit 0 cleared
+
 `endif

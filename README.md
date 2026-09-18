@@ -46,13 +46,13 @@ non-zero on any failure, so this works unchanged in CI.
 
 | Group | Instructions | Status |
 |---|---|---|
-| ALU (register/immediate) | `add` `sub` `sll` `slt` `sltu` `xor` `srl` `sra` `or` `and` | ALU verified |
-| Upper immediate | `lui` `auipc` | U-type immediate verified |
-| Jumps | `jal` `jalr` | J-type immediate verified |
-| Branches | `beq` `bne` `blt` `bge` `bltu` `bgeu` | comparator verified |
-| Loads | `lb` `lh` `lw` `lbu` `lhu` | not yet |
-| Stores | `sb` `sh` `sw` | S-type immediate verified |
-| System | `ecall` `ebreak` `fence` | not yet |
+| ALU (register/immediate) | `add` `sub` `sll` `slt` `sltu` `xor` `srl` `sra` `or` `and` | decoded + ALU verified |
+| Upper immediate | `lui` `auipc` | decoded + immediate verified |
+| Jumps | `jal` `jalr` | decoded + immediate verified |
+| Branches | `beq` `bne` `blt` `bge` `bltu` `bgeu` | decoded + comparator verified |
+| Loads | `lb` `lh` `lw` `lbu` `lhu` | decoded |
+| Stores | `sb` `sh` `sw` | decoded + immediate verified |
+| System | `ecall` `ebreak` `fence` | decoded and flagged |
 
 ## Design notes
 
