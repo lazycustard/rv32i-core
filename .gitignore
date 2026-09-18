@@ -1,0 +1,32 @@
+# Simulation build products
+sim/
+*.vvp
+*.vcd
+*.fst
+*.lxt2
+*.log
+
+# GTKWave
+*.gtkw.bak
+
+# Vivado (project mode leaves a lot of noise; we use non-project Tcl builds)
+*.jou
+*.log
+*.str
+.Xil/
+vivado*/
+*.xpr
+*.cache/
+*.hw/
+*.ip_user_files/
+*.runs/
+*.sim/
+build/
+reports/
+
+# Editors / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db

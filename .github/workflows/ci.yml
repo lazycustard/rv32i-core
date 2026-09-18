@@ -1,0 +1,29 @@
+name: tests
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  simulate:
+    name: Icarus Verilog testbenches
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Icarus Verilog
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y iverilog
+
+      - name: Show tool version
+        run: iverilog -V | head -1
+
+      - name: Lint
+        run: make lint
+
+      - name: Run self-checking testbenches
+        run: make test
