@@ -1,5 +1,7 @@
 # rv32i-core
 
+[![tests](https://github.com/lazycustard/rv32i-core/actions/workflows/ci.yml/badge.svg)](https://github.com/lazycustard/rv32i-core/actions/workflows/ci.yml)
+
 A 5-stage pipelined RISC-V **RV32I** processor written in Verilog, built
 test-first: every module ships with a self-checking testbench, and nothing is
 claimed to work until a test proves it.
