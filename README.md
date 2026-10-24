@@ -1,4 +1,8 @@
-# rv32i-core
+| **Fmax** | **95.6 MHz** | WNS −0.458 ns against a 10 ns target |
+
+Timing is not met at the 100 MHz target: 400 of 3,195 endpoints miss, by
+about 0.19 ns each. Hold timing passes everywhere, which is the harder half
+to fix. At 95.6 MHz the design meets timing with nothing left over.# rv32i-core
 
 [![tests](https://github.com/lazycustard/rv32i-core/actions/workflows/ci.yml/badge.svg)](https://github.com/lazycustard/rv32i-core/actions/workflows/ci.yml)
 
@@ -362,7 +366,34 @@ ex_rs1_addr → hazard unit comparator → forwarding mux
 17 logic levels, 9 of them carry chains, and **60% of the delay is routing
 rather than logic** — the design is spread out more than it is deep.
 
-### An optimisation that did not work
+### Two optimisations that did not work
+
+Both are recorded because the reasoning is worth more than the outcome, and
+because knowing what has already been tried is the useful part.
+
+**Confining the design to one clock region.** The placer spread the logic
+across two clock regions with a visible gap between the halves, and 60% of
+the critical path was routing rather than logic. Packing everything into
+`CLOCKREGION_X0Y1` with a pblock should shorten the wires.
+
+It went the other way — **95.6 MHz → 91.1 MHz**. The interesting part is
+how:
+
+| | Logic | Routing | Levels |
+|---|---|---|---|
+| Default placement | 3.95 ns (40%) | 5.99 ns (60%) | 17 |
+| Confined to one region | 2.39 ns (23%) | **7.98 ns (77%)** | 11 |
+
+Logic delay fell and routing delay rose by a third, with every cell packed
+into a *smaller* area. Shorter straight-line distances, longer wires: the
+most likely reading is congestion — too much logic for the routing
+resources of one region, so wires detour instead of going direct.
+
+The gap was not waste. It was the placer relieving congestion, and
+overriding it reintroduced exactly the problem it had been avoiding. Try
+`PBLOCK=1 make synth` to reproduce; the default is off.
+
+**Not clearing `id_pc` on flush.**
 
 The path ends at a flip-flop *reset* pin, and `id_pc` is cleared on flush
 for no reason: a flushed slot carries a NOP, which never reads it. Removing
@@ -379,6 +410,18 @@ reproduced `−0.458 ns` exactly, to the digit, so Vivado is deterministic
 here and the 1.8 MHz difference was a real regression rather than
 place-and-route noise. The change was reverted — an optimisation that fails
 its own justification is not worth the asymmetry it adds to the code.
+
+**What both have in common.** Each assumed the tool had left something on
+the table, and each was wrong in the same way: the design is not held back
+by one slow path but by being broadly a little slow. 400 of 3,195 endpoints
+miss, by about 0.19 ns each. That is a property of the whole placement, not
+of any one path, and local edits just move which path happens to be last.
+
+The honest conclusion is that 95.6 MHz is what this design does on this
+part without a structural change. Making it meaningfully faster means
+shortening the EX stage itself — resolving branches earlier, or splitting
+the forward-then-compare chain across a pipeline stage — not persuading the
+placer.
 
 ## Design notes
 

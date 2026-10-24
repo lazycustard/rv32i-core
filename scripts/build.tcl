@@ -68,6 +68,32 @@ write_checkpoint -force $outdir/post_synth.dcp
 report_utilization -file $rptdir/post_synth_utilization.rpt
 
 #-------------------------------------------------------------------------
+# Optional floorplanning
+#
+# Left to itself the placer spread the design across two clock regions with
+# a visible gap between the halves, and 60% of the critical path delay was
+# routing rather than logic -- 400 endpoints failing by about 0.19 ns each,
+# which is the signature of distance rather than of one slow path.
+#
+# A pblock confines every cell to one clock region, so nothing has to cross
+# that gap. Set PBLOCK=1 to enable it.
+#
+# This is done after synthesis, not in the XDC, because the cells it refers
+# to do not exist until the netlist does.
+#-------------------------------------------------------------------------
+set use_pblock 0
+if {[llength $argv] > 1} { set use_pblock [lindex $argv 1] }
+
+if {$use_pblock} {
+    puts " floorplanning: confining the design to CLOCKREGION_X0Y1"
+    create_pblock pblock_core
+    resize_pblock [get_pblocks pblock_core] \
+        -add {CLOCKREGION_X0Y1:CLOCKREGION_X0Y1}
+    add_cells_to_pblock [get_pblocks pblock_core] \
+        [get_cells -quiet -hierarchical -filter {IS_PRIMITIVE}]
+}
+
+#-------------------------------------------------------------------------
 # Implementation
 #-------------------------------------------------------------------------
 opt_design

@@ -5,7 +5,8 @@
 # installer does not add itself to PATH.
 #
 # Usage:
-#   ./scripts/run_synth.sh
+#   ./scripts/run_synth.sh              default placement
+#   PBLOCK=1 ./scripts/run_synth.sh     confine the design to one clock region
 
 set -u
 
@@ -75,7 +76,7 @@ cd "$SCRATCH"
 # working directory on every run. The reports this build cares about are
 # written explicitly by the script.
 "$VIVADO" -mode batch -source "$REPO/scripts/build.tcl" \
-    -nojournal -nolog -tclargs "$REPO"
+    -nojournal -nolog -tclargs "$REPO" "${PBLOCK:-0}"
 rc=$?
 
 # Bring the reports back into the repository. They are small text files and
