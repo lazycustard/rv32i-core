@@ -38,6 +38,7 @@ make lint               # syntax and width checks, no simulation
 make wave TB=alu        # open the waveform in GTKWave
 make riscv-tests        # official conformance suite (needs RISC-V GCC)
 make programs           # compile and run the C programs in tests/programs/
+make synth              # Vivado: LUTs, Fmax, critical path (no board needed)
 BP=0 make programs      # same, with the branch predictor disabled
 ```
 
@@ -306,6 +307,79 @@ which is where this would go next.
 theory — that `fib`'s recursion was simply deeper than the stack. The
 actual limit was *when* the stack was updated, not how big it was.
 
+## Synthesis
+
+Simulation says whether the core is correct. It says nothing about how much
+of a chip it takes or how fast it can run. For that it has to go through
+Vivado — no board required; synthesis, placement, routing and timing
+analysis all run against a model of the device.
+
+```bash
+make synth      # needs Vivado on PATH or in C:/AMDDesignTools, C:/Xilinx
+make gui        # open the routed design to look at it
+```
+
+Artix-7 `xc7a35tcpg236-1`, out of context, `rv32i_core` alone:
+
+| | | of device |
+|---|---|---|
+| LUTs | 1,642 | 7.9% |
+| Flip-flops | 998 | 2.4% |
+| LUT as memory | 164 | 1.7% |
+| Block RAMs | 0 | — |
+| DSPs | 0 | — |
+| **Fmax** | **95.6 MHz** | WNS −0.458 ns against a 10 ns target |
+
+The build is `scripts/build.tcl`, run in non-project mode. A Vivado project
+is a `.xpr` and a tree of generated directories — binary, machine-specific,
+and useless in version control. The script *is* the build.
+
+### What synthesis caught that simulation could not
+
+The first run reported **3 LUTs and 273 MHz**. That was not a bad design;
+it was no design. With the memories inside `rv32i_core`, the program was a
+compile-time constant — `imem` is filled with NOP by an initial block and
+nothing outside could change it — so Vivado propagated that through the
+whole pipeline. Only the free-running performance counters survived.
+
+It was a real limitation, not just a measurement artefact: **a core with
+its program sealed inside has no way to be given one on hardware.** The
+testbenches reached in and wrote the memory arrays directly, which works in
+simulation and nowhere else. 432 local checks, 40 official tests and 4 C
+programs all passed over it. Synthesis found it on the first run.
+
+So `rv32i_core` is now the pipeline alone, with memory reached through
+ports, and `rv32i_soc` wires the memories on for simulation — which is also
+the shape Phase 5 needs to swap them for block RAM.
+
+### The critical path
+
+```
+ex_rs1_addr → hazard unit comparator → forwarding mux
+            → branch comparator → mispredict → id_pc reset pin
+```
+
+17 logic levels, 9 of them carry chains, and **60% of the delay is routing
+rather than logic** — the design is spread out more than it is deep.
+
+### An optimisation that did not work
+
+The path ends at a flip-flop *reset* pin, and `id_pc` is cleared on flush
+for no reason: a flushed slot carries a NOP, which never reads it. Removing
+that clear takes 64 reset pins off the end of the critical path.
+
+It made things worse — **95.6 MHz → 93.8 MHz**. The path did not disappear,
+it relocated: `mem_rd_addr → ex_rs1_addr`'s reset pin, which is the same
+shape one stage over. The premise was wrong. The problem is not those
+particular 64 pins; it is that the flush signal fans out to reset pins
+across the whole pipeline, and removing one group promotes the next.
+
+Worth noting how that was established: re-running the unmodified design
+reproduced `−0.458 ns` exactly, to the digit, so Vivado is deterministic
+here and the 1.8 MHz difference was a real regression rather than
+place-and-route noise. The change was reverted — an optimisation that fails
+its own justification is not worth the asymmetry it adds to the code.
+
 ## Design notes
 
 **The ALU control field is 4 bits, not 3.** RV32I has ten distinct ALU
@@ -351,7 +425,7 @@ sim/                 simulation output (git-ignored)
 - [x] **Phase 1** — complete and correct RV32I instruction set
 - [x] **Phase 2** — official [riscv-tests](https://github.com/riscv-software-src/riscv-tests) conformance suite
 - [x] **Phase 3** — run compiled C programs, UART output
-- [~] **Phase 4** — performance counters and CPI done; synthesis numbers need Vivado
+- [x] **Phase 4** — performance counters, CPI, branch prediction, synthesis numbers
 - [ ] **Phase 5** — block RAM inference, timing closure on Artix-7
 - [ ] **Phase 6** — M / C / Zicsr extensions
 
