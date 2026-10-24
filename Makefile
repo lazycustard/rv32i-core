@@ -56,4 +56,4 @@ programs:
 # Vivado synthesis and implementation. Needs Vivado on PATH; no board
 # required. Produces utilisation, Fmax and the critical path in reports/.
 synth:
-	@vivado -mode batch -source scripts/build.tcl -nojournal -nolog
+	@bash scripts/run_synth.sh

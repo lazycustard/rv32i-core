@@ -77,48 +77,77 @@ report_timing -sort_by group -max_paths 10 -path_type full \
     -file $rptdir/critical_paths.rpt
 
 #-------------------------------------------------------------------------
-# Pull the headline numbers out, so they do not have to be dug for
+# Pull the headline numbers out, so they do not have to be dug for.
+#
+# Everything below is wrapped in catch. Synthesis and implementation take
+# minutes; a typo in a reporting query must not throw that away. The
+# checkpoint and the full reports are already written by this point, so a
+# failure here loses only the convenience summary -- reopen post_route.dcp
+# and query it directly.
 #-------------------------------------------------------------------------
-set wns  [get_property SLACK [get_timing_paths -max_paths 1 -nworst 1 -setup]]
-set fmax [expr {1000.0 / ($period_ns - $wns)}]
+proc count_prims {group} {
+    if {[catch {
+        set n [llength [get_cells -hierarchical -quiet \
+                   -filter "PRIMITIVE_GROUP == $group"]]
+    } err]} {
+        puts "  (could not count $group: $err)"
+        return -1
+    }
+    return $n
+}
 
-set luts  [llength [get_cells -hierarchical -filter {PRIMITIVE_GROUP == LUT}   -quiet]]
-set ffs   [llength [get_cells -hierarchical -filter {PRIMITIVE_GROUP == FLOP_LATCH} -quiet]]
-set brams [llength [get_cells -hierarchical -filter {PRIMITIVE_GROUP == BLOCKRAM}   -quiet]]
-set dsps  [llength [get_cells -hierarchical -filter {PRIMITIVE_GROUP == ARITHMETIC} -quiet]]
+set wns  "unknown"
+set fmax "unknown"
+if {[catch {
+    set paths [get_timing_paths -max_paths 1 -nworst 1 -delay_type max]
+    set wns   [get_property SLACK [lindex $paths 0]]
+    set fmax  [expr {1000.0 / ($period_ns - $wns)}]
+} err]} {
+    puts "  (could not read timing slack: $err)"
+    puts "  Read it from $rptdir/timing_summary.rpt instead."
+}
+
+set luts  [count_prims LUT]
+set ffs   [count_prims FLOP_LATCH]
+set brams [count_prims BLOCKRAM]
+set dsps  [count_prims ARITHMETIC]
 
 puts ""
 puts "=========================================================="
 puts " RESULTS"
 puts "=========================================================="
-puts [format " LUTs            %8d" $luts]
-puts [format " Flip-flops      %8d" $ffs]
-puts [format " Block RAMs      %8d" $brams]
-puts [format " DSP slices      %8d" $dsps]
+puts [format " LUTs            %8s" $luts]
+puts [format " Flip-flops      %8s" $ffs]
+puts [format " Block RAMs      %8s" $brams]
+puts [format " DSP slices      %8s" $dsps]
 puts ""
-puts [format " Worst slack     %8.3f ns  (target %.1f ns)" $wns $period_ns]
-puts [format " Fmax            %8.1f MHz" $fmax]
-puts ""
-if {$wns < 0} {
-    puts " Timing NOT met at the target period. Fmax above is still the"
-    puts " achievable frequency; the target was simply set too high."
-} else {
-    puts " Timing met. Fmax above is what the critical path allows, so"
-    puts " tightening the target would not change it."
+if {$wns ne "unknown"} {
+    puts [format " Worst slack     %8.3f ns  (target %.1f ns)" $wns $period_ns]
+    puts [format " Fmax            %8.1f MHz" $fmax]
+    puts ""
+    if {$wns < 0} {
+        puts " Timing NOT met at the target period. Fmax above is still the"
+        puts " achievable frequency; the target was simply set too high."
+    } else {
+        puts " Timing met. Fmax above is what the critical path allows, so"
+        puts " tightening the target would not change it."
+    }
 }
 puts "=========================================================="
 puts " Reports in $rptdir/ -- critical_paths.rpt names the cells on the"
-puts " path that sets Fmax."
+puts " path that sets Fmax. Checkpoint in $outdir/post_route.dcp."
 puts "=========================================================="
 
 # Write the headline numbers where a script can read them back.
-set fh [open "$rptdir/summary.txt" w]
-puts $fh "part      $part"
-puts $fh "luts      $luts"
-puts $fh "ffs       $ffs"
-puts $fh "brams     $brams"
-puts $fh "dsps      $dsps"
-puts $fh "wns_ns    $wns"
-puts $fh "fmax_mhz  [format %.1f $fmax]"
-puts $fh "mem_words $mem_words"
-close $fh
+catch {
+    set fh [open "$rptdir/summary.txt" w]
+    puts $fh "part      $part"
+    puts $fh "luts      $luts"
+    puts $fh "ffs       $ffs"
+    puts $fh "brams     $brams"
+    puts $fh "dsps      $dsps"
+    puts $fh "wns_ns    $wns"
+    puts $fh "fmax_mhz  $fmax"
+    puts $fh "mem_words $mem_words"
+    close $fh
+}
