@@ -30,6 +30,16 @@ The build is `scripts/build.tcl`, run in non-project mode. A Vivado project
 is a `.xpr` and a tree of generated directories — binary, machine-specific,
 and useless in version control. The script *is* the build.
 
+![Vivado's timing summary](images/timing-summary.png)
+
+Setup timing is missed and hold timing is met, which is the better way
+round: a hold violation cannot be fixed by slowing the clock down.
+
+The number worth reading here is **400 failing endpoints out of 3,195**,
+totalling −76.569 ns — about 0.19 ns each. That is not one slow path to go
+and fix. It is the whole design being slightly too slow for a 100 MHz
+target, which is what the two failed optimisations below ran into.
+
 ## What synthesis caught that simulation could not
 
 The first run reported **3 LUTs and 273 MHz**. That was not a bad design;

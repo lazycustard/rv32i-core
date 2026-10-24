@@ -99,6 +99,24 @@ LUTs — and there was no way to load a program on real hardware either.
 stages simple, but infers distributed LUT RAM rather than block RAM.
 Converting them is Phase 5 and is flagged in the source.
 
+## On the chip
+
+![The core placed on an Artix-7](docs/images/device-floorplan.png)
+
+The whole `xc7a35t` die. The six outlined boxes are clock regions; the
+orange columns at the edges are I/O banks, unused here because the core is
+synthesised out of context. The teal cluster in the middle is the entire
+processor — 7.9% of the device. Twelve more would fit.
+
+![The placed cells, zoomed in](docs/images/placed-cells.png)
+
+Closer in, each teal square is a slice holding some of the 1,642 LUTs and
+998 flip-flops. They sit in vertical columns because that is how the chip
+is built. Note the gap: the placer spread the design over two clock regions
+rather than packing it into one, which is why 60% of the critical path
+delay is wire rather than logic — and why
+[forcing it together made things slower](docs/synthesis.md).
+
 ## Going deeper
 
 | | |
@@ -122,16 +140,6 @@ tests/riscv-tests/   the official suite, as a submodule (unmodified)
 scripts/             build and test runners
 constraints/         timing constraints for synthesis
 ```
-
-## Roadmap
-
-- [x] **Phase 0** — toolchain, test harness, CI
-- [x] **Phase 1** — complete and correct RV32I instruction set
-- [x] **Phase 2** — official riscv-tests conformance suite
-- [x] **Phase 3** — compiled C programs, UART output
-- [x] **Phase 4** — performance counters, branch prediction, synthesis numbers
-- [ ] **Phase 5** — block RAM inference, timing closure
-- [ ] **Phase 6** — M / C / Zicsr extensions
 
 ## License
 
