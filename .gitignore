@@ -34,5 +34,8 @@ reports/
 .DS_Store
 Thumbs.db
 
+# Vivado strays it writes into the current directory
+dfx_runtime.txt
+
 # Vivado scratch directory
 .Xil/
