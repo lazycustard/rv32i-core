@@ -51,7 +51,7 @@ module program_tb;
     reg [1023:0] out_file;
     reg [1023:0] test_name;
 
-    rv32i_core #(
+    rv32i_soc #(
         .IMEM_WORDS (MEM_WORDS),
         .DMEM_WORDS (MEM_WORDS),
         .BP_ENABLE  (BP_ENABLE)
@@ -127,7 +127,7 @@ module program_tb;
         end
 
         for (i = 0; i < 32; i = i + 1) begin
-            dut.u_reg_file.regs[i] = 32'b0;
+            dut.u_core.u_reg_file.regs[i] = 32'b0;
         end
 
         @(posedge clk);

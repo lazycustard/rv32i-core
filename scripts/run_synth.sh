@@ -23,10 +23,11 @@ find_vivado() {
                 /d/AMDDesignTools /d/Xilinx; do
         [ -d "$root" ] || continue
         for ver in $(ls -1r "$root" 2>/dev/null); do
-            if [ -x "$root/$ver/Vivado/bin/vivado.bat" ]; then
+            # -f not -x: a .bat carries no executable bit under Git Bash.
+            if [ -f "$root/$ver/Vivado/bin/vivado.bat" ]; then
                 echo "$root/$ver/Vivado/bin/vivado.bat"; return 0
             fi
-            if [ -x "$root/Vivado/$ver/bin/vivado.bat" ]; then
+            if [ -f "$root/Vivado/$ver/bin/vivado.bat" ]; then
                 echo "$root/Vivado/$ver/bin/vivado.bat"; return 0
             fi
         done
@@ -47,10 +48,44 @@ VIVADO="$(find_vivado)" || {
     exit 127
 }
 
-echo "vivado: $VIVADO"
+REPO="$(pwd)"
+
+# Vivado creates a .Xil scratch directory in whatever its working directory
+# is, and deletes it on exit. This repository lives under OneDrive, which
+# holds file handles open while it syncs, so that delete fails and takes
+# synth_design down with it:
+#
+#   ERROR: [Designutils 20-411] The directory '.../.Xil/.../realtime'
+#   could not be deleted and may be locked.
+#
+# So Vivado is run from a scratch directory outside any synced folder, and
+# told where the repository is. Sources are read from there and reports are
+# written back there; only Vivado's own temporary files stay behind.
+SCRATCH="${TEMP:-/tmp}/rv32i-core-synth"
+mkdir -p "$SCRATCH"
+
+echo "vivado:  $VIVADO"
+echo "repo:    $REPO"
+echo "scratch: $SCRATCH"
 echo
+
+cd "$SCRATCH"
 
 # -nojournal/-nolog: Vivado otherwise drops vivado.jou and vivado.log in the
 # working directory on every run. The reports this build cares about are
 # written explicitly by the script.
-exec "$VIVADO" -mode batch -source scripts/build.tcl -nojournal -nolog
+"$VIVADO" -mode batch -source "$REPO/scripts/build.tcl" \
+    -nojournal -nolog -tclargs "$REPO"
+rc=$?
+
+# Bring the reports back into the repository. They are small text files and
+# are the point of the whole run; the .dcp checkpoints are large and
+# git-ignored, so they stay behind in the scratch directory.
+if [ -d "$SCRATCH/reports" ]; then
+    mkdir -p "$REPO/reports"
+    cp -f "$SCRATCH/reports/"* "$REPO/reports/" 2>/dev/null
+    echo
+    echo "reports copied to $REPO/reports/"
+fi
+
+exit $rc

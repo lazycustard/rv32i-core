@@ -37,7 +37,7 @@ module riscv_tests_tb;
     reg [1023:0] dmem_file;
     reg [1023:0] test_name;
 
-    rv32i_core #(
+    rv32i_soc #(
         .IMEM_WORDS (MEM_WORDS),
         .DMEM_WORDS (MEM_WORDS)
     ) dut (
@@ -57,7 +57,7 @@ module riscv_tests_tb;
     end
 
     // a0 is x10: the register the environment reports the result in.
-    wire [31:0] a0 = dut.u_reg_file.regs[10];
+    wire [31:0] a0 = dut.u_core.u_reg_file.regs[10];
 
     initial begin
         clk         = 1'b0;
@@ -83,7 +83,7 @@ module riscv_tests_tb;
         end
 
         for (i = 0; i < 32; i = i + 1) begin
-            dut.u_reg_file.regs[i] = 32'b0;
+            dut.u_core.u_reg_file.regs[i] = 32'b0;
         end
 
         @(posedge clk);

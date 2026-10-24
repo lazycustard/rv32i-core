@@ -22,14 +22,26 @@ set part      "xc7a35tcpg236-1"    ;# Artix-7 35T, the Basys 3 part
 set top       "rv32i_core"
 set period_ns 10.000               ;# must match constraints/core.xdc
 
-# Memory depth for synthesis. The defaults in the RTL are 4096 words each,
-# and with asynchronous reads that infers distributed LUT RAM rather than
-# block RAM -- roughly 256 Kb of it, which does not fit this device. Phase 5
-# converts the memories to synchronous reads so they map to block RAM.
-# Until then, synthesising with small memories measures the pipeline logic,
-# which is the part this run is actually about.
-set mem_words 256
+# The top is rv32i_core, the pipeline on its own, with the memories outside
+# it. That is not a convenience: with the memories inside, the program was a
+# compile-time constant and synthesis folded the whole design down to three
+# LUTs. rv32i_soc wires the memories back on for simulation.
 
+# The repository root, passed in by run_synth.sh. Vivado itself runs from a
+# scratch directory outside OneDrive, so every path here has to be absolute.
+if {[llength $argv] < 1} {
+    puts "ERROR: no repository root given. Run via scripts/run_synth.sh."
+    exit 1
+}
+set repo [lindex $argv 0]
+
+# Outputs go to Vivado's own working directory -- the scratch dir outside
+# OneDrive -- not straight into the repository. OneDrive takes transient
+# locks on folders it is syncing, and Vivado reports that as
+#   ERROR: the path .../build ... is not writable
+# even when the shell can write there perfectly well. run_synth.sh copies
+# the reports back afterwards; the checkpoints are large and git-ignored,
+# so they stay in the scratch directory.
 set outdir "build"
 set rptdir "reports"
 file mkdir $outdir
@@ -42,17 +54,15 @@ puts "=========================================================="
 #-------------------------------------------------------------------------
 # Read design
 #-------------------------------------------------------------------------
-read_verilog [glob rtl/*.v]
-read_xdc constraints/core.xdc
+read_verilog [glob $repo/rtl/*.v]
+read_xdc $repo/constraints/core.xdc
 
 #-------------------------------------------------------------------------
 # Synthesis
 #-------------------------------------------------------------------------
 # out_of_context: no I/O buffers are inserted, so the core can be analysed
 # without inventing pin assignments for a board it is not on.
-synth_design -top $top -part $part -mode out_of_context \
-    -generic IMEM_WORDS=$mem_words \
-    -generic DMEM_WORDS=$mem_words
+synth_design -top $top -part $part -mode out_of_context
 
 write_checkpoint -force $outdir/post_synth.dcp
 report_utilization -file $rptdir/post_synth_utilization.rpt
@@ -148,6 +158,6 @@ catch {
     puts $fh "dsps      $dsps"
     puts $fh "wns_ns    $wns"
     puts $fh "fmax_mhz  $fmax"
-    puts $fh "mem_words $mem_words"
+    puts $fh "top       $top"
     close $fh
 }

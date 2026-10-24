@@ -38,7 +38,7 @@ module tb_core;
 
     reg saw_illegal;
 
-    rv32i_core #(
+    rv32i_soc #(
         .IMEM_WORDS (MEM_WORDS),
         .DMEM_WORDS (MEM_WORDS)
     ) dut (
@@ -96,7 +96,7 @@ module tb_core;
                 dut.u_imem.mem[i] = prog[i];
             end
             for (i = 0; i < 32; i = i + 1) begin
-                dut.u_reg_file.regs[i] = 32'b0;
+                dut.u_core.u_reg_file.regs[i] = 32'b0;
             end
 
             saw_illegal = 1'b0;
@@ -134,11 +134,11 @@ module tb_core;
         input [31:0] expected;
         begin
             checks = checks + 1;
-            if (dut.u_reg_file.regs[regnum] !== expected) begin
+            if (dut.u_core.u_reg_file.regs[regnum] !== expected) begin
                 errors = errors + 1;
                 $display("  FAIL  %0s: x%0d = %h, expected %h",
                          prog_name, regnum,
-                         dut.u_reg_file.regs[regnum], expected);
+                         dut.u_core.u_reg_file.regs[regnum], expected);
             end
         end
     endtask

@@ -24,16 +24,25 @@
 
 module rv32i_core #(
     parameter [31:0]  RESET_ADDR = 32'h0000_0000,
-    parameter integer IMEM_WORDS = 4096,
-    parameter integer DMEM_WORDS = 4096,
-    parameter         IMEM_INIT  = "",
     parameter integer BP_ENTRIES = 64,
     parameter integer BP_ENABLE  = 1,   // 0 reproduces the always-not-taken baseline
-    parameter integer RAS_DEPTH  = 8,
-    parameter         DMEM_INIT  = ""
+    parameter integer RAS_DEPTH  = 8
 ) (
     input  wire        clk_i,
     input  wire        rst_i,          // synchronous, active high
+
+    // Instruction memory. Combinational read: the instruction at imem_addr_o
+    // must be present on imem_data_i in the same cycle.
+    output wire [31:0] imem_addr_o,
+    input  wire [31:0] imem_data_i,
+
+    // Data memory. The byte enables leave here already gated -- low for a
+    // peripheral access and low for a misaligned one -- so the memory needs
+    // no write-enable of its own.
+    output wire [31:0] dmem_addr_o,
+    output wire [31:0] dmem_wdata_o,
+    output wire [3:0]  dmem_byte_en_o,
+    input  wire [31:0] dmem_rdata_i,
 
     // UART transmit. One character per cycle that uart_valid_o is high.
     // On an FPGA this drives a real serial transmitter; in simulation the
@@ -75,13 +84,13 @@ module rv32i_core #(
     wire        ex_mispredict;
     wire [31:0] ex_correct_pc;
 
-    imem #(
-        .WORDS     (IMEM_WORDS),
-        .INIT_FILE (IMEM_INIT)
-    ) u_imem (
-        .addr_i  (if_pc),
-        .instr_o (if_instr)
-    );
+    // The instruction memory is outside this module. Keeping it inside made
+    // the program a compile-time constant -- synthesis folded the entire
+    // pipeline away and reported three LUTs -- and left no way to load a
+    // program on real hardware. See rv32i_soc.v, which wires the memories
+    // back up for simulation.
+    assign imem_addr_o = if_pc;
+    assign if_instr    = imem_data_i;
 
     //----------------------------------------------------------------------
     // Branch prediction happens here, before the instruction has even been
@@ -545,18 +554,16 @@ module rv32i_core #(
 
     // A store to peripheral space must not also land in memory.
     wire [3:0]  dmem_byte_en = mem_is_periph ? 4'b0000 : mem_byte_en;
-    wire [31:0] dmem_rdata;
 
-    dmem #(
-        .WORDS     (DMEM_WORDS),
-        .INIT_FILE (DMEM_INIT)
-    ) u_dmem (
-        .clk_i     (clk_i),
-        .addr_i    (mem_alu_result),
-        .wdata_i   (mem_store_word),
-        .byte_en_i (dmem_byte_en),
-        .rdata_o   (dmem_rdata)
-    );
+
+    // Likewise the data memory. The address decode and the UART stay here,
+    // so what leaves this module is already gated: byte enables are low for
+    // a peripheral access, and low for a misaligned one.
+    assign dmem_addr_o    = mem_alu_result;
+    assign dmem_wdata_o   = mem_store_word;
+    assign dmem_byte_en_o = dmem_byte_en;
+
+    wire [31:0] dmem_rdata = dmem_rdata_i;
 
     //----------------------------------------------------------------------
     // UART, memory mapped at 0x1000_0000:

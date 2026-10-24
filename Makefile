@@ -9,6 +9,7 @@
 #   make riscv-tests    official riscv-tests suite (needs RISC-V GCC)
 #   make programs       compile and run the C programs (needs RISC-V GCC)
 #   make synth          Vivado synthesis: LUTs, Fmax, critical path
+#   make gui            open the routed design in the Vivado GUI
 #   make clean      remove build products
 #
 # Everything is delegated to scripts/run_tests.sh so that there is exactly
@@ -22,7 +23,7 @@ TB_DIR  := tb
 SIM_DIR := sim
 TB      ?=
 
-.PHONY: all test riscv-tests programs synth lint wave clean
+.PHONY: all test riscv-tests programs synth gui lint wave clean
 
 all: test
 
@@ -57,3 +58,8 @@ programs:
 # required. Produces utilisation, Fmax and the critical path in reports/.
 synth:
 	@bash scripts/run_synth.sh
+
+# Open the routed design in the Vivado GUI to look at the floorplan,
+# schematic and critical path. Requires "make synth" to have run.
+gui:
+	@bash scripts/open_gui.sh
